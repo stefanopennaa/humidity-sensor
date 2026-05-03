@@ -642,8 +642,7 @@ void maybeSendLowHumidityAlert() {
     nowEpoch,
     RESEND_URGENT_SUBJECT,
     "Allerta umidità bassa",
-    "Invio automatico per soglia sotto 30%"
-  );
+    "Invio automatico per soglia sotto 30%");
 }
 
 /**
