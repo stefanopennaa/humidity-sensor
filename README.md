@@ -3,10 +3,10 @@
 <p align="center">
   <img src="https://img.shields.io/badge/version-2026.05.03-blue.svg" alt="Version">
   <img src="https://img.shields.io/badge/platform-ESP8266-green.svg" alt="Platform">
-  <img src="https://img.shields.io/badge/status-hobby-orange.svg" alt="Status">
+  <img src="https://img.shields.io/badge/license-MIT-yellow.svg" alt="License">
 </p>
 
-Arduino firmware to monitor soil humidity with **ESP8266**, display it on an **SSD1306 OLED** and a web dashboard, keep a 24h history, and send automatic emails.
+Firmware for an **ESP8266 soil humidity monitor** with capacitive sensor input, SSD1306 OLED output, responsive web dashboard, 24h history, automatic email alerts, and OTA updates.
 
 > Hobby project (AI-assisted), use at your own risk.
 
@@ -27,19 +27,24 @@ Arduino firmware to monitor soil humidity with **ESP8266**, display it on an **S
 - 2.4 GHz WiFi network
 - Arduino libraries: `Adafruit_GFX`, `Adafruit_SSD1306`, `ESP8266WebServer`, `ESP8266HTTPClient`, `ElegantOTA`, `LittleFS`
 
-## Quick Start
+## Quick start
 
-1. Copy the example secrets file:
+1. Clone the repository.
+   ```bash
+   git clone https://github.com/stefanopennaa/humidity-sensor.git
+   cd humidity-sensor
+   ```
+2. Copy the example secrets file:
    ```bash
    cp secrets.example.h secrets.h
    ```
-2. Fill `secrets.h` with your WiFi credentials, Resend settings, and OTA/restart credentials.
-3. Verify calibration values in `humidity-sensor.ino`:
-   - `ADC_DRY` (sensor in dry/air condition)
-   - `ADC_WET` (sensor in wet/water condition)
-4. Open `humidity-sensor.ino` in Arduino IDE, select board/port, and upload the firmware.
+3. Fill `secrets.h` with your WiFi credentials, Resend settings, and OTA/restart credentials.
+4. Verify calibration values in `humidity-sensor.ino`:
+    - `ADC_DRY` (sensor in dry/air condition)
+    - `ADC_WET` (sensor in wet/water condition)
+5. Open `humidity-sensor.ino` in Arduino IDE, select board/port, and upload the firmware.
 
-## Web Endpoints
+## Web endpoints
 
 | Endpoint | Description |
 | --- | --- |
@@ -49,19 +54,29 @@ Arduino firmware to monitor soil humidity with **ESP8266**, display it on an **S
 | `/api/restart` (POST) | Device reboot (Basic Auth) |
 | `/update` | OTA page |
 
-## Main Configuration (`humidity-sensor.ino`)
+## Main configuration (`humidity-sensor.ino`)
 
 - Sensor calibration: `ADC_DRY`, `ADC_WET`
 - Intervals: `SENSOR_UPDATE_INTERVAL_MS`, `HISTORY_SAMPLE_INTERVAL_MS`, `EMAIL_RETRY_INTERVAL_MS`
 - Email scheduling: `DAILY_EMAIL_HOUR`, `DAILY_EMAIL_MINUTE`
 - Timezone/NTP: `TZ_INFO`, `NTP_SERVER_1`, `NTP_SERVER_2`
-- Soil status thresholds: logic `<30`, `<65`, `>=65`
+- Soil status thresholds: `<30` dry, `<65` medium, `>=65` wet
 
-## Known Limitations
+## Known limitations
 
 - Email delivery depends on internet connectivity and DNS resolution for `api.resend.com`.
 - History retention is limited by `HISTORY_MAX_SAMPLES` and the 24h API window.
 - Measurement quality depends on real-world sensor calibration in your setup.
+
+## Quick troubleshooting
+
+| Problem | Check |
+| --- | --- |
+| WiFi not connected | Verify SSID/password in `secrets.h` and use a 2.4 GHz network |
+| Humidity values look wrong | Recalibrate `ADC_DRY` and `ADC_WET` for your sensor |
+| No email notifications | Check Resend credentials, sender/recipient, and internet connectivity |
+| Dashboard empty/unreachable | Confirm device IP and that the ESP8266 is connected to WiFi |
+| OTA update unavailable | Open `/update` and verify OTA credentials in `secrets.h` |
 
 ## Changelog
 
@@ -76,6 +91,15 @@ Arduino firmware to monitor soil humidity with **ESP8266**, display it on an **S
 - `secrets.h` is ignored by Git via `.gitignore`.
 - Never commit real credentials.
 - If credentials were previously exposed, always rotate passwords and API keys.
+
+## License
+
+MIT, see [LICENSE](LICENSE).
+
+## Support
+
+- Issue tracker: [GitHub Issues](https://github.com/stefanopennaa/humidity-sensor/issues)
+- Email: stefano@stefanopenna.it
 
 ## File Structure
 
