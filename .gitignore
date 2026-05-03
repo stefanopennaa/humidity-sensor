@@ -1,0 +1,8 @@
+# Build artifacts
+build/
+
+# Local secrets
+secrets.h
+
+# macOS
+.DS_Store
