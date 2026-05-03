@@ -44,6 +44,16 @@ Firmware for an **ESP8266 soil humidity monitor** with capacitive sensor input, 
     - `ADC_WET` (sensor in wet/water condition)
 5. Open `humidity-sensor.ino` in Arduino IDE, select board/port, and upload the firmware.
 
+## File structure
+
+| File | Role |
+| --- | --- |
+| `humidity-sensor.ino` | Main firmware logic |
+| `web_page_template.h` | Web dashboard HTML/CSS/JS template |
+| `email_template.h` | HTML email template |
+| `secrets.example.h` | Public configuration template |
+| `secrets.h` | Local secrets (not versioned) |
+
 ## Web endpoints
 
 | Endpoint | Description |
@@ -100,13 +110,3 @@ MIT, see [LICENSE](LICENSE).
 
 - Issue tracker: [GitHub Issues](https://github.com/stefanopennaa/humidity-sensor/issues)
 - Email: stefano@stefanopenna.it
-
-## File Structure
-
-| File | Role |
-| --- | --- |
-| `humidity-sensor.ino` | Main firmware logic |
-| `web_page_template.h` | Web dashboard HTML/CSS/JS template |
-| `email_template.h` | HTML email template |
-| `secrets.example.h` | Public configuration template |
-| `secrets.h` | Local secrets (not versioned) |
