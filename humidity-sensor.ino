@@ -4,12 +4,14 @@
  * Purpose: Main firmware entrypoint (sensing, display, networking, API, OTA, email).
  *
  * Changelog:
+ * - 2026-05-04: Added DHT11 on D2, extended /api/humidity with ambient fields, and updated OLED layout (Temp/Humi).
  * - 2026-05-03: Reorganized header comments and standardized code formatting (form only).
  */
 
 #include <Wire.h>
 #include <Adafruit_GFX.h>
 #include <Adafruit_SSD1306.h>
+#include <DHT.h>
 #include <ESP8266WiFi.h>
 #include <ESP8266WebServer.h>
 #include <ESP8266HTTPClient.h>
@@ -38,6 +40,10 @@ constexpr uint8_t OLED_SCL_PIN = D6;
 constexpr uint8_t SOIL_SENSOR_PIN = A0;
 constexpr int ADC_DRY = 1023;  // Adjust based on sensor in air
 constexpr int ADC_WET = 127;   // Adjust based on sensor in water
+
+// --- Ambient Sensor (DHT11) ---
+constexpr uint8_t DHT_SENSOR_PIN = D2;
+constexpr uint8_t DHT_SENSOR_TYPE = DHT11;
 
 // --- Timing Configuration ---
 constexpr unsigned long WIFI_RETRY_INTERVAL_MS = 5000;                   // Retry Wi-Fi every 5s
@@ -79,6 +85,7 @@ const char* RESEND_ENDPOINT = "https://api.resend.com/emails";
 
 // Built-in OLED bus.
 Adafruit_SSD1306 display(SCREEN_WIDTH, SCREEN_HEIGHT, &Wire, -1);
+DHT dhtSensor(DHT_SENSOR_PIN, DHT_SENSOR_TYPE);
 
 // Web server on port 80
 ESP8266WebServer server(80);
@@ -90,6 +97,9 @@ ESP8266WebServer server(80);
 // --- Soil Moisture ---
 int gHumidityRaw = 0;
 int gHumidityPercent = 0;
+float gAirTemperatureC = 0.0f;
+float gAirHumidityPercent = 0.0f;
+bool gDhtReadingValid = false;
 
 // --- Wi-Fi State ---
 String gWifiStatus = "WiFi...";
@@ -129,6 +139,24 @@ void readHumiditySensor() {
   gHumidityPercent = constrain(gHumidityPercent, 0, 100);
 }
 
+/**
+ * Read ambient temperature/humidity from DHT11.
+ * On transient read failure, keep previous values and mark current sample invalid.
+ */
+void readDhtSensor() {
+  const float temperatureC = dhtSensor.readTemperature();
+  const float humidityPercent = dhtSensor.readHumidity();
+
+  if (isnan(temperatureC) || isnan(humidityPercent)) {
+    gDhtReadingValid = false;
+    return;
+  }
+
+  gAirTemperatureC = temperatureC;
+  gAirHumidityPercent = humidityPercent;
+  gDhtReadingValid = true;
+}
+
 // ============================================================================
 // DISPLAY
 // ============================================================================
@@ -138,7 +166,8 @@ void readHumiditySensor() {
  * Layout:
  * - Line 1: Title
  * - Line 2: Soil moisture %
- * - Line 3: Raw ADC
+ * - Line 3: Air temperature
+ * - Line 4: Air humidity
  * - Line 5: Wi-Fi status
  */
 void renderOled() {
@@ -150,16 +179,30 @@ void renderOled() {
   display.setCursor(0, 2);
   display.print("Umidita terreno");
 
-  display.setCursor(0, 16);
+  display.setCursor(0, 14);
   display.print("Umidita: ");
   display.print(gHumidityPercent);
   display.print("%");
 
-  display.setCursor(0, 30);
-  display.print("ADC: ");
-  display.print(gHumidityRaw);
+  display.setCursor(0, 26);
+  display.print("Temp: ");
+  if (gDhtReadingValid) {
+    display.print(gAirTemperatureC, 1);
+    display.print("C");
+  } else {
+    display.print("--");
+  }
 
-  display.setCursor(0, 56);
+  display.setCursor(0, 38);
+  display.print("Humi: ");
+  if (gDhtReadingValid) {
+    display.print(gAirHumidityPercent, 0);
+    display.print("%");
+  } else {
+    display.print("--");
+  }
+
+  display.setCursor(0, 50);
   display.print(gWifiStatus);
   display.display();
 }
@@ -188,10 +231,13 @@ void handleRoot() {
 
 /**
  * Handle GET /api/humidity → return current analog sensor readings as JSON.
- * Returns: {raw, humidity}
+ * Returns: {raw, humidity, airTempC, airHumidity, airOk}
  */
 void handleHumidityApi() {
-  const String json = "{\"raw\":" + String(gHumidityRaw) + ",\"humidity\":" + String(gHumidityPercent) + "}";
+  const String airTempJson = gDhtReadingValid ? String(gAirTemperatureC, 1) : "null";
+  const String airHumidityJson = gDhtReadingValid ? String(gAirHumidityPercent, 0) : "null";
+  const String json =
+    "{\"raw\":" + String(gHumidityRaw) + ",\"humidity\":" + String(gHumidityPercent) + ",\"airTempC\":" + airTempJson + ",\"airHumidity\":" + airHumidityJson + ",\"airOk\":" + String(gDhtReadingValid ? "true" : "false") + "}";
   server.send(200, "application/json", json);
 }
 
@@ -832,7 +878,9 @@ void setup() {
 
   // Initialize soil moisture sensor.
   pinMode(SOIL_SENSOR_PIN, INPUT);
+  dhtSensor.begin();
   readHumiditySensor();
+  readDhtSensor();
   renderOled();
 
   // Initialize history storage on LittleFS.
@@ -860,6 +908,7 @@ void loop() {
   if (now - lastUpdateMs >= SENSOR_UPDATE_INTERVAL_MS) {
     lastUpdateMs = now;
     readHumiditySensor();
+    readDhtSensor();
     renderOled();
   }
 

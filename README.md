@@ -1,18 +1,19 @@
 # Humidity Sensor (ESP8266 + SSD1306)
 
 <p align="center">
-  <img src="https://img.shields.io/badge/version-2026.05.03-blue.svg" alt="Version">
+  <img src="https://img.shields.io/badge/version-2026.05.04-blue.svg" alt="Version">
   <img src="https://img.shields.io/badge/platform-ESP8266-green.svg" alt="Platform">
   <img src="https://img.shields.io/badge/license-MIT-yellow.svg" alt="License">
 </p>
 
-Firmware for an **ESP8266 soil humidity monitor** with capacitive sensor input, SSD1306 OLED output, responsive web dashboard, 24h history, automatic email alerts, and OTA updates.
+Firmware for an **ESP8266 soil humidity monitor** with capacitive soil sensor (`A0`), DHT11 ambient sensor (`D2`), SSD1306 OLED output, responsive web dashboard, 24h history, automatic email alerts, and OTA updates.
 
 > Hobby project (AI-assisted), use at your own risk.
 
 ## Overview
 
 - **Soil humidity reading** from a capacitive sensor on `A0`.
+- **Ambient reading** from DHT11 on `D2` (temperature + RH%).
 - **Local OLED display** (SSD1306, I2C on `D5`/`D6`).
 - **Responsive web dashboard** with live value and history chart.
 - **24h history** stored on LittleFS with rolling retention.
@@ -23,9 +24,12 @@ Firmware for an **ESP8266 soil humidity monitor** with capacitive sensor input, 
 
 - ESP8266 (e.g. NodeMCU / compatible D1 mini)
 - Capacitive soil humidity sensor (analog output)
+- DHT11 temperature/humidity sensor (digital output on `D2`)
 - Display OLED SSD1306 128x64
 - 2.4 GHz WiFi network
-- Arduino libraries: `Adafruit_GFX`, `Adafruit_SSD1306`, `ESP8266WebServer`, `ESP8266HTTPClient`, `ElegantOTA`, `LittleFS`
+- Arduino libraries: `Adafruit_GFX`, `Adafruit_SSD1306`, `DHT sensor library`, `ESP8266WebServer`, `ESP8266HTTPClient`, `ElegantOTA`, `LittleFS`
+
+> Note: resistive soil moisture sensors tend to degrade quickly in continuous use (often within a few weeks), which is why this project uses a capacitive sensor on `A0`.
 
 ## Quick start
 
@@ -59,7 +63,7 @@ Firmware for an **ESP8266 soil humidity monitor** with capacitive sensor input, 
 | Endpoint | Description |
 | --- | --- |
 | `/` | Main dashboard |
-| `/api/humidity` | Current reading (`raw`, `humidity`) |
+| `/api/humidity` | Current readings (`raw`, `humidity`, `airTempC`, `airHumidity`, `airOk`) |
 | `/api/history` | History samples (24h window) |
 | `/api/restart` (POST) | Device reboot (Basic Auth) |
 | `/update` | OTA page |
@@ -67,6 +71,7 @@ Firmware for an **ESP8266 soil humidity monitor** with capacitive sensor input, 
 ## Main configuration (`humidity-sensor.ino`)
 
 - Sensor calibration: `ADC_DRY`, `ADC_WET`
+- DHT setup: `DHT_SENSOR_PIN`, `DHT_SENSOR_TYPE`
 - Intervals: `SENSOR_UPDATE_INTERVAL_MS`, `HISTORY_SAMPLE_INTERVAL_MS`, `EMAIL_RETRY_INTERVAL_MS`
 - Email scheduling: `DAILY_EMAIL_HOUR`, `DAILY_EMAIL_MINUTE`
 - Timezone/NTP: `TZ_INFO`, `NTP_SERVER_1`, `NTP_SERVER_2`
@@ -95,6 +100,13 @@ Firmware for an **ESP8266 soil humidity monitor** with capacitive sensor input, 
 - Code formatting normalized (no logic changes).
 - README rewritten and aligned to a cleaner presentation.
 - Sensitive data removed from the repository and `secrets.example.h` added.
+
+### 2026.05.04
+- Added DHT11 support on `D2` (ambient temperature + humidity).
+- OLED now shows ambient values in addition to soil values.
+- `/api/humidity` extended with DHT fields while keeping existing soil fields.
+- Web dashboard now shows ambient temperature and humidity values.
+- Added a note explaining why resistive probes were replaced by a capacitive sensor.
 
 ## Security
 

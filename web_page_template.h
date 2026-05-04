@@ -8,6 +8,7 @@
  * Purpose: Web dashboard HTML/CSS/JS template with runtime placeholders.
  *
  * Changelog:
+ * - 2026-05-04: Added ambient temperature/humidity fields from DHT11 and refreshed UI labels/icons.
  * - 2026-05-03: Reorganized header comments and standardized formatting (form only).
  */
 
@@ -56,7 +57,7 @@ const char HOMEPAGE_TEMPLATE[] PROGMEM = R"rawliteral(
         grid-template-columns: repeat(2, minmax(0, 1fr));
         grid-template-areas: "soil history";
         gap: 18px;
-        align-items: start;
+        align-items: stretch;
         justify-content: center;
       }
 
@@ -65,6 +66,9 @@ const char HOMEPAGE_TEMPLATE[] PROGMEM = R"rawliteral(
 
       .card {
         width: 100%;
+        height: 100%;
+        display: flex;
+        flex-direction: column;
         background: var(--card);
         border: 1px solid rgba(148, 163, 184, 0.18);
         border-radius: 18px;
@@ -202,6 +206,11 @@ const char HOMEPAGE_TEMPLATE[] PROGMEM = R"rawliteral(
         color: var(--muted);
       }
 
+      .card-history #historyInfo {
+        margin-top: auto;
+        padding-top: 12px;
+      }
+
       @media (max-width: 640px) {
         body {
           padding: 12px;
@@ -301,7 +310,8 @@ const char HOMEPAGE_TEMPLATE[] PROGMEM = R"rawliteral(
         </div>
 
         <div class="meta">
-          <div>ADC: <strong id="raw">--</strong></div>
+          <div>Temp ambiente: <strong id="airTemp">--</strong></div>
+          <div>Umidita ambiente: <strong id="airHumidity">--</strong></div>
           <div>IP: <strong>__DEVICE_IP__</strong></div>
         </div>
 
@@ -351,10 +361,15 @@ const char HOMEPAGE_TEMPLATE[] PROGMEM = R"rawliteral(
 
           const data = await response.json();
           const humidity = Number(data.humidity);
-          const raw = Number(data.raw);
+          const airTempC = Number(data.airTempC);
+          const airHumidity = Number(data.airHumidity);
+          const airOk = (data.airOk === true || data.airOk === 1 || data.airOk === 'true');
 
           document.getElementById('pct').textContent = humidity;
-          document.getElementById('raw').textContent = raw;
+          document.getElementById('airTemp').textContent =
+            (airOk && Number.isFinite(airTempC)) ? airTempC.toFixed(1) + ' C' : '--';
+          document.getElementById('airHumidity').textContent =
+            (airOk && Number.isFinite(airHumidity)) ? airHumidity.toFixed(0) + ' %' : '--';
           document.getElementById('bar').style.width = Math.max(0, Math.min(100, humidity)) + '%';
           updateLevel(humidity);
           stateText.textContent = 'Ultimo aggiornamento: ' + new Date().toLocaleTimeString();
