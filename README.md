@@ -72,7 +72,7 @@ Firmware for an **ESP8266 soil humidity monitor** with capacitive soil sensor (`
 
 - Sensor calibration: `ADC_DRY`, `ADC_WET`
 - DHT setup: `DHT_SENSOR_PIN`, `DHT_SENSOR_TYPE`
-- Intervals: `SENSOR_UPDATE_INTERVAL_MS`, `HISTORY_SAMPLE_INTERVAL_MS`, `EMAIL_RETRY_INTERVAL_MS`
+- Intervals: `SENSOR_UPDATE_INTERVAL_MS`, `SENSOR_REFRESH_INTERVAL_MS`, `HISTORY_REFRESH_INTERVAL_MS`, `HISTORY_SAMPLE_INTERVAL_MS`, `EMAIL_RETRY_INTERVAL_MS`
 - Email scheduling: `DAILY_EMAIL_HOUR`, `DAILY_EMAIL_MINUTE`
 - Timezone/NTP: `TZ_INFO`, `NTP_SERVER_1`, `NTP_SERVER_2`
 - Soil status thresholds: `<30` dry, `<65` medium, `>=65` wet
@@ -94,6 +94,9 @@ Firmware for an **ESP8266 soil humidity monitor** with capacitive soil sensor (`
 | OTA update unavailable | Open `/update` and verify OTA credentials in `secrets.h` |
 
 ## Changelog
+
+### 2026.05.07
+- Web dashboard labels updated to "Temp. ambiente" and "Umidità ambiente".
 
 ### 2026.05.03
 - Formal reorganization of source file headers/changelog comments.

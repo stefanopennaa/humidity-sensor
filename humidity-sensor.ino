@@ -4,6 +4,7 @@
  * Purpose: Main firmware entrypoint (sensing, display, networking, API, OTA, email).
  *
  * Changelog:
+ * - 2026-05-07: Updated web dashboard ambient labels ("Temp. ambiente", "Umidità ambiente").
  * - 2026-05-04: Added DHT11 on D2, extended /api/humidity with ambient fields, and updated OLED layout (Temp/Humi).
  * - 2026-05-03: Reorganized header comments and standardized code formatting (form only).
  */
@@ -54,6 +55,7 @@ constexpr unsigned long INTERNET_CHECK_INTERVAL_MS = 30000;              // Veri
 constexpr unsigned long INTERNET_RECONNECT_GRACE_MS = 60000;             // Reconnect if internet is down >60s
 constexpr unsigned long SENSOR_UPDATE_INTERVAL_MS = 5000;                // Read sensors every 5s
 constexpr unsigned long SENSOR_REFRESH_INTERVAL_MS = 5000;               // Frontend refresh interval
+constexpr unsigned long HISTORY_REFRESH_INTERVAL_MS = 60000;             // Refresh history chart every 60s
 constexpr unsigned long EMAIL_RETRY_INTERVAL_MS = 10UL * 60UL * 1000UL;  // Retry email after 10min
 
 // --- History Storage ---
@@ -121,6 +123,9 @@ bool gWasBelowLowHumidityThreshold = false;
 // --- History State ---
 unsigned long gLastHistorySampleMs = 0;
 bool gHistoryFsReady = false;
+String gHistoryCacheJson = "{\"ok\":false,\"reason\":\"not_ready\",\"points\":[]}";
+unsigned long gLastHistoryCacheBuildMs = 0;
+bool gHistoryCacheDirty = true;
 
 void ensureOledBus() {
   Wire.begin(OLED_SDA_PIN, OLED_SCL_PIN);
@@ -218,7 +223,7 @@ String buildHomePage() {
   String html = FPSTR(HOMEPAGE_TEMPLATE);
   html.replace("__DEVICE_IP__", WiFi.localIP().toString());
   html.replace("__REFRESH_MS__", String(SENSOR_REFRESH_INTERVAL_MS));
-  html.replace("__REFRESH_S__", String(SENSOR_REFRESH_INTERVAL_MS / 1000));
+  html.replace("__HISTORY_REFRESH_MS__", String(HISTORY_REFRESH_INTERVAL_MS));
   return html;
 }
 
@@ -298,6 +303,7 @@ void enforceHistoryRetention() {
     String line = inputCount.readStringUntil('\n');
     line.trim();
     if (line.length() > 0) ++totalLines;
+    yield();
   }
   inputCount.close();
 
@@ -321,9 +327,11 @@ void enforceHistoryRetention() {
     if (line.length() == 0) continue;
     if (lineIndex < skipLines) {
       ++lineIndex;
+      yield();
       continue;
     }
     output.println(line);
+    yield();
   }
   input.close();
   output.close();
@@ -349,6 +357,7 @@ void appendHistorySample(time_t epochSeconds, int humidityPercent) {
   history.close();
 
   enforceHistoryRetention();
+  gHistoryCacheDirty = true;
 }
 
 /**
@@ -410,10 +419,12 @@ String buildHistoryJson() {
 
     const time_t sampleEpoch = static_cast<time_t>(epoch.toInt());
     if (canFilterLast24h && sampleEpoch < minEpoch) {
+      yield();
       continue;
     }
 
     ++eligibleLines;
+    yield();
   }
   inputCount.close();
 
@@ -450,11 +461,13 @@ String buildHistoryJson() {
 
     const time_t sampleEpoch = static_cast<time_t>(epoch.toInt());
     if (canFilterLast24h && sampleEpoch < minEpoch) {
+      yield();
       continue;
     }
 
     if (eligibleIndex < skipEligibleLines) {
       ++eligibleIndex;
+      yield();
       continue;
     }
     ++eligibleIndex;
@@ -468,6 +481,7 @@ String buildHistoryJson() {
     json += humidity;
     json += "}";
     ++emitted;
+    yield();
   }
   input.close();
 
@@ -481,7 +495,14 @@ String buildHistoryJson() {
  * Handle GET /api/history → return 24h history as JSON.
  */
 void handleHistoryApi() {
-  server.send(200, "application/json", buildHistoryJson());
+  const unsigned long nowMs = millis();
+  const bool cacheExpired = (nowMs - gLastHistoryCacheBuildMs >= HISTORY_REFRESH_INTERVAL_MS);
+  if (gHistoryCacheDirty || cacheExpired) {
+    gHistoryCacheJson = buildHistoryJson();
+    gLastHistoryCacheBuildMs = nowMs;
+    gHistoryCacheDirty = false;
+  }
+  server.send(200, "application/json", gHistoryCacheJson);
 }
 
 // ============================================================================
@@ -886,6 +907,7 @@ void setup() {
   // Initialize history storage on LittleFS.
   initHistoryStorage();
   gLastHistorySampleMs = millis() - HISTORY_SAMPLE_INTERVAL_MS;
+  gHistoryCacheDirty = true;
 
   // Connect to Wi-Fi and sync time via NTP.
   connectWiFi();
@@ -918,4 +940,5 @@ void loop() {
 
   server.handleClient();
   ElegantOTA.loop();
+  delay(1);
 }

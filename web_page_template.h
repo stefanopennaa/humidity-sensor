@@ -8,6 +8,7 @@
  * Purpose: Web dashboard HTML/CSS/JS template with runtime placeholders.
  *
  * Changelog:
+ * - 2026-05-07: Updated ambient labels to "Temp. ambiente" and "Umidità ambiente".
  * - 2026-05-04: Added ambient temperature/humidity fields from DHT11 and refreshed UI labels/icons.
  * - 2026-05-03: Reorganized header comments and standardized formatting (form only).
  */
@@ -310,8 +311,8 @@ const char HOMEPAGE_TEMPLATE[] PROGMEM = R"rawliteral(
         </div>
 
         <div class="meta">
-          <div>Temp ambiente: <strong id="airTemp">--</strong></div>
-          <div>Umidita ambiente: <strong id="airHumidity">--</strong></div>
+          <div>Temp. ambiente: <strong id="airTemp">--</strong></div>
+          <div>Umidità ambiente: <strong id="airHumidity">--</strong></div>
           <div>IP: <strong>__DEVICE_IP__</strong></div>
         </div>
 
@@ -471,7 +472,7 @@ const char HOMEPAGE_TEMPLATE[] PROGMEM = R"rawliteral(
       refreshHumidity();
       refreshHistory();
       setInterval(refreshHumidity, __REFRESH_MS__);
-      setInterval(refreshHistory, __REFRESH_MS__);
+      setInterval(refreshHistory, __HISTORY_REFRESH_MS__);
     </script>
   </body>
 </html>
