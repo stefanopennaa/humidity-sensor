@@ -1,7 +1,7 @@
 # Humidity Sensor (ESP8266 + SSD1306)
 
 <p align="center">
-  <img src="https://img.shields.io/badge/version-2026.05.04-blue.svg" alt="Version">
+  <img src="https://img.shields.io/badge/version-2026.05.08-blue.svg" alt="Version">
   <img src="https://img.shields.io/badge/platform-ESP8266-green.svg" alt="Platform">
   <img src="https://img.shields.io/badge/license-MIT-yellow.svg" alt="License">
 </p>
@@ -88,12 +88,18 @@ Firmware for an **ESP8266 soil humidity monitor** with capacitive soil sensor (`
 | Problem | Check |
 | --- | --- |
 | WiFi not connected | Verify SSID/password in `secrets.h` and use a 2.4 GHz network |
+| WiFi status stuck on "No WiFi. Retry..." | Update to firmware `2026.05.08+` (Wi-Fi state detection and disconnect debounce hardened) |
 | Humidity values look wrong | Recalibrate `ADC_DRY` and `ADC_WET` for your sensor |
 | No email notifications | Check Resend credentials, sender/recipient, and internet connectivity |
 | Dashboard empty/unreachable | Confirm device IP and that the ESP8266 is connected to WiFi |
 | OTA update unavailable | Open `/update` and verify OTA credentials in `secrets.h` |
 
 ## Changelog
+
+### 2026.05.08
+- Hardened Wi-Fi connectivity detection to avoid false negatives from transient ESP8266 status states.
+- Added a Wi-Fi disconnect debounce window to prevent infinite "No WiFi. Retry..." loops during brief glitches or blocking phases.
+- Improved runtime Wi-Fi status text consistency after reconnection.
 
 ### 2026.05.07
 - Web dashboard labels updated to "Temp. ambiente" and "Umidità ambiente".

@@ -4,6 +4,7 @@
  * Purpose: Main firmware entrypoint (sensing, display, networking, API, OTA, email).
  *
  * Changelog:
+ * - 2026-05-08: Hardened Wi-Fi connectivity detection and added disconnect debounce to prevent false infinite "No WiFi. Retry..." loops.
  * - 2026-05-07: Updated web dashboard ambient labels ("Temp. ambiente", "Umidità ambiente").
  * - 2026-05-04: Added DHT11 on D2, extended /api/humidity with ambient fields, and updated OLED layout (Temp/Humi).
  * - 2026-05-03: Reorganized header comments and standardized code formatting (form only).
@@ -50,6 +51,7 @@ constexpr uint8_t DHT_SENSOR_TYPE = DHT11;
 constexpr unsigned long WIFI_RETRY_INTERVAL_MS = 5000;                   // Retry Wi-Fi every 5s
 constexpr unsigned long WIFI_CONNECT_TIMEOUT_MS = 15000;                 // Initial connection timeout
 constexpr unsigned long WIFI_CONNECT_POLL_MS = 500;                      // Poll interval during connect
+constexpr unsigned long WIFI_DISCONNECT_DEBOUNCE_MS = 15000;             // Ignore brief Wi-Fi status glitches
 constexpr unsigned long WIFI_DISPLAY_IP_MS = 5000;                       // Alternate IP display every 5s
 constexpr unsigned long INTERNET_CHECK_INTERVAL_MS = 30000;              // Verify internet/DNS every 30s
 constexpr unsigned long INTERNET_RECONNECT_GRACE_MS = 60000;             // Reconnect if internet is down >60s
@@ -109,6 +111,7 @@ unsigned long gLastWifiRetryMs = 0;
 unsigned long gLastWifiIpDisplayMs = 0;
 bool gShowWifiIp = false;
 bool gWasWifiConnected = false;
+unsigned long gWifiDisconnectedSinceMs = 0;
 unsigned long gLastInternetCheckMs = 0;
 unsigned long gLastInternetOkMs = 0;
 bool gInternetReachable = false;
@@ -126,6 +129,19 @@ bool gHistoryFsReady = false;
 String gHistoryCacheJson = "{\"ok\":false,\"reason\":\"not_ready\",\"points\":[]}";
 unsigned long gLastHistoryCacheBuildMs = 0;
 bool gHistoryCacheDirty = true;
+
+/**
+ * Robust Wi-Fi connectivity check.
+ * Some ESP8266 firmware states may transiently report a non-connected status
+ * while the station still has a valid IP lease.
+ */
+bool isWifiConnected() {
+  if (WiFi.status() == WL_CONNECTED || WiFi.isConnected()) {
+    return true;
+  }
+  const IPAddress ip = WiFi.localIP();
+  return ip[0] != 0 || ip[1] != 0 || ip[2] != 0 || ip[3] != 0;
+}
 
 void ensureOledBus() {
   Wire.begin(OLED_SDA_PIN, OLED_SCL_PIN);
@@ -698,7 +714,7 @@ void maybeSendLowHumidityAlert() {
   }
 
   gWasBelowLowHumidityThreshold = true;
-  if (WiFi.status() != WL_CONNECTED) {
+  if (!isWifiConnected()) {
     gEmailStatus = "Low humid alert: no wifi";
     gLastEmailErrorDetail = "";
     return;
@@ -717,7 +733,7 @@ void maybeSendLowHumidityAlert() {
  * At most one successful scheduled email per local day.
  */
 void maybeSendScheduledEmail() {
-  if (WiFi.status() != WL_CONNECTED) {
+  if (!isWifiConnected()) {
     return;
   }
 
@@ -778,11 +794,11 @@ void connectWiFi() {
   WiFi.begin(WIFI_SSID, WIFI_PASSWORD);
 
   const unsigned long startMs = millis();
-  while (WiFi.status() != WL_CONNECTED && millis() - startMs < WIFI_CONNECT_TIMEOUT_MS) {
+  while (!isWifiConnected() && millis() - startMs < WIFI_CONNECT_TIMEOUT_MS) {
     delay(WIFI_CONNECT_POLL_MS);
   }
 
-  if (WiFi.status() == WL_CONNECTED) {
+  if (isWifiConnected()) {
     gWasWifiConnected = true;
     gShowWifiIp = false;
     const unsigned long now = millis();
@@ -814,7 +830,8 @@ void connectWiFi() {
 void maintainWiFi() {
   const unsigned long now = millis();
 
-  if (WiFi.status() == WL_CONNECTED) {
+  if (isWifiConnected()) {
+    gWifiDisconnectedSinceMs = 0;
     if (!gWasWifiConnected) {
       gWasWifiConnected = true;
       gShowWifiIp = false;
@@ -846,9 +863,19 @@ void maintainWiFi() {
     if (now - gLastWifiIpDisplayMs >= WIFI_DISPLAY_IP_MS) {
       gLastWifiIpDisplayMs = now;
       gShowWifiIp = !gShowWifiIp;
-      gWifiStatus = gShowWifiIp ? WiFi.localIP().toString() : "Connected";
     }
+    gWifiStatus = gShowWifiIp ? WiFi.localIP().toString() : "Connected";
     return;
+  }
+
+  if (gWasWifiConnected) {
+    if (gWifiDisconnectedSinceMs == 0) {
+      gWifiDisconnectedSinceMs = now;
+      return;
+    }
+    if (now - gWifiDisconnectedSinceMs < WIFI_DISCONNECT_DEBOUNCE_MS) {
+      return;
+    }
   }
 
   gWasWifiConnected = false;
