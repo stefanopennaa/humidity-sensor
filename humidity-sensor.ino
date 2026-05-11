@@ -4,6 +4,8 @@
  * Purpose: Main firmware entrypoint (sensing, display, networking, API, OTA, email).
  *
  * Changelog:
+ * - 2026-05-11: Added email network preflight (daily Wi-Fi reconnect + internet check before email delivery attempts, including low-humidity alerts).
+ * - 2026-05-11: Daily email schedule moved to 10:00 local time and email body extended with ambient temperature/humidity.
  * - 2026-05-08: Hardened Wi-Fi connectivity detection and added disconnect debounce to prevent false infinite "No WiFi. Retry..." loops.
  * - 2026-05-07: Updated web dashboard ambient labels ("Temp. ambiente", "Umidità ambiente").
  * - 2026-05-04: Added DHT11 on D2, extended /api/humidity with ambient fields, and updated OLED layout (Temp/Humi).
@@ -70,7 +72,7 @@ const char* HISTORY_TMP_FILE_PATH = "/humidity_history.tmp";
 
 // --- Email Schedule ---
 // Daily summary sent after this time (local timezone)
-constexpr int DAILY_EMAIL_HOUR = 8;
+constexpr int DAILY_EMAIL_HOUR = 10;
 constexpr int DAILY_EMAIL_MINUTE = 0;
 
 // --- Time & Timezone ---
@@ -118,6 +120,7 @@ bool gInternetReachable = false;
 
 // --- Email State ---
 int gLastDailyEmailDayKey = -1;
+int gLastEmailNetworkPreflightDayKey = -1;
 unsigned long gLastEmailAttemptMs = 0;
 String gEmailStatus = "Email idle";
 String gLastEmailErrorDetail = "";
@@ -562,6 +565,71 @@ int buildLocalDayKey(time_t nowEpoch) {
   return (localTimeInfo.tm_year + 1900) * 1000 + localTimeInfo.tm_yday;
 }
 
+/**
+ * Wait for Wi-Fi connection with timeout.
+ */
+bool waitForWifiConnection(unsigned long timeoutMs) {
+  const unsigned long startMs = millis();
+  while (!isWifiConnected() && millis() - startMs < timeoutMs) {
+    delay(WIFI_CONNECT_POLL_MS);
+  }
+  return isWifiConnected();
+}
+
+/**
+ * Ensure email network preflight:
+ * - Once per local day, force a fresh Wi-Fi reconnect before any email send attempt.
+ * - Always verify internet reachability (DNS) right before the email request.
+ */
+bool runEmailNetworkPreflight(time_t nowEpoch, const char* deliveryContext) {
+  const int dayKey = buildLocalDayKey(nowEpoch);
+  const bool shouldDailyReconnect = (dayKey >= 0) && (dayKey != gLastEmailNetworkPreflightDayKey);
+  const bool needReconnect = shouldDailyReconnect || !isWifiConnected();
+
+  if (needReconnect) {
+    gWifiStatus = "WiFi reconnect...";
+    renderOled();
+    WiFi.disconnect();
+    delay(120);
+    WiFi.begin(WIFI_SSID, WIFI_PASSWORD);
+
+    if (!waitForWifiConnection(WIFI_CONNECT_TIMEOUT_MS)) {
+      gWasWifiConnected = false;
+      gInternetReachable = false;
+      gLastInternetCheckMs = 0;
+      gLastInternetOkMs = 0;
+      gWifiStatus = "No WiFi";
+      gEmailStatus = "Email no wifi";
+      gLastEmailErrorDetail = String(deliveryContext) + " | reconnect timeout";
+      return false;
+    }
+
+    gWasWifiConnected = true;
+    gShowWifiIp = false;
+    gLastWifiIpDisplayMs = millis();
+    if (shouldDailyReconnect) {
+      gLastEmailNetworkPreflightDayKey = dayKey;
+    }
+  }
+
+  IPAddress resendIp;
+  const int dnsResult = resolveResendHost(resendIp);
+  const unsigned long nowMs = millis();
+  gLastInternetCheckMs = nowMs;
+  gInternetReachable = (dnsResult == 1);
+
+  if (!gInternetReachable) {
+    gWifiStatus = "No internet";
+    gEmailStatus = "Email no internet";
+    gLastEmailErrorDetail = String(deliveryContext) + " | DNS api.resend.com failed (" + String(dnsResult) + ")";
+    return false;
+  }
+
+  gLastInternetOkMs = nowMs;
+  gWifiStatus = "Connected";
+  return true;
+}
+
 // ============================================================================
 // EMAIL NOTIFICATIONS
 // ============================================================================
@@ -587,7 +655,7 @@ String jsonEscape(const String& input) {
 }
 
 /**
- * Send email via Resend API with soil moisture data.
+ * Send email via Resend API with soil and ambient data.
  * Retries once on failure for network resilience.
  * Returns: true if email sent successfully.
  */
@@ -595,6 +663,10 @@ bool sendDailyUpdateEmail(time_t nowEpoch, const char* subject, const char* emai
   if (strlen(RESEND_API_KEY) == 0) {
     gEmailStatus = "Email err: no key";
     gLastEmailErrorDetail = "";
+    return false;
+  }
+
+  if (!runEmailNetworkPreflight(nowEpoch, deliveryContext)) {
     return false;
   }
 
@@ -609,8 +681,13 @@ bool sendDailyUpdateEmail(time_t nowEpoch, const char* subject, const char* emai
   strftime(timeHmBuffer, sizeof(timeHmBuffer), "%H:%M", &localTimeInfo);
 
   // Build plain text email body.
+  const String airTempDisplay = gDhtReadingValid ? (String(gAirTemperatureC, 1) + "C") : "--";
+  const String airHumidityDisplay = gDhtReadingValid ? (String(gAirHumidityPercent, 0) + "%") : "--";
+
   String textBody = String(emailHeadline) + ".\n";
   textBody += "Umidità terreno: " + String(gHumidityPercent) + "%\n";
+  textBody += "Temperatura ambiente: " + airTempDisplay + "\n";
+  textBody += "Umidità ambiente: " + airHumidityDisplay + "\n";
   textBody += "Ora locale: " + String(timeHmBuffer);
 
   // Determine soil moisture level badge styling.
@@ -629,6 +706,8 @@ bool sendDailyUpdateEmail(time_t nowEpoch, const char* subject, const char* emai
   htmlBody.replace("__LEVEL_TEXT__", levelText);
   htmlBody.replace("__LEVEL_COLOR__", levelColor);
   htmlBody.replace("__HUMIDITY__", String(gHumidityPercent));
+  htmlBody.replace("__AIR_TEMP__", airTempDisplay);
+  htmlBody.replace("__AIR_HUMIDITY__", airHumidityDisplay);
   htmlBody.replace("__TIME_HM__", String(timeHmBuffer));
   htmlBody.replace("__EMAIL_HEADLINE__", String(emailHeadline));
   htmlBody.replace("__DELIVERY_CONTEXT__", String(deliveryContext));
@@ -714,11 +793,6 @@ void maybeSendLowHumidityAlert() {
   }
 
   gWasBelowLowHumidityThreshold = true;
-  if (!isWifiConnected()) {
-    gEmailStatus = "Low humid alert: no wifi";
-    gLastEmailErrorDetail = "";
-    return;
-  }
 
   const time_t nowEpoch = time(nullptr);
   sendDailyUpdateEmail(
@@ -767,15 +841,6 @@ void maybeSendScheduledEmail() {
     return;
   }
 
-  IPAddress resendIp;
-  const int dnsResult = resolveResendHost(resendIp);
-  if (dnsResult != 1) {
-    gLastEmailAttemptMs = nowMs;
-    gEmailStatus = "Email no internet";
-    gLastEmailErrorDetail = "DNS api.resend.com failed (" + String(dnsResult) + ") | rssi:" + String(WiFi.RSSI());
-    return;
-  }
-
   gLastEmailAttemptMs = nowMs;
   if (sendDailyUpdateEmail(nowEpoch, RESEND_SUBJECT, "Aggiornamento terreno", "Invio automatico giornaliero")) {
     gLastDailyEmailDayKey = dayKey;
@@ -793,12 +858,7 @@ void connectWiFi() {
   WiFi.mode(WIFI_STA);
   WiFi.begin(WIFI_SSID, WIFI_PASSWORD);
 
-  const unsigned long startMs = millis();
-  while (!isWifiConnected() && millis() - startMs < WIFI_CONNECT_TIMEOUT_MS) {
-    delay(WIFI_CONNECT_POLL_MS);
-  }
-
-  if (isWifiConnected()) {
+  if (waitForWifiConnection(WIFI_CONNECT_TIMEOUT_MS)) {
     gWasWifiConnected = true;
     gShowWifiIp = false;
     const unsigned long now = millis();

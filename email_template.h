@@ -8,6 +8,7 @@
  * Purpose: HTML email template with placeholders for runtime sensor data.
  *
  * Changelog:
+ * - 2026-05-11: Added ambient temperature/humidity cards to email template.
  * - 2026-05-03: Reorganized header comments and standardized formatting (form only).
  */
 
@@ -155,6 +156,34 @@ const char EMAIL_TEMPLATE[] PROGMEM = R"rawliteral(
                                 <td height="50" style="height: 50px; padding: 12px; vertical-align: top;">
                                   <p class="label" style="margin: 0; font-size: 12px; color: #64748b;">Stato terreno</p>
                                   <p class="value value-secondary" style="margin: 6px 0 0 0; font-size: 28px; line-height: 1; font-weight: 700; color: __LEVEL_COLOR__;">__LEVEL_TEXT__</p>
+                                </td>
+                              </tr>
+                            </table>
+                          </td>
+                        </tr>
+                      </table>
+                    </td>
+                  </tr>
+                  <tr>
+                    <td class="mobile-padding" style="padding: 0 24px 18px 24px;">
+                      <table role="presentation" width="100%" cellspacing="0" cellpadding="0" border="0" style="margin-bottom: 16px;">
+                        <tr class="stack-column">
+                          <td class="stack-column-cell" style="width: 50%; vertical-align: top; padding-right: 9px;">
+                            <table role="presentation" class="soft-card" width="100%" cellspacing="0" cellpadding="0" border="0" style="border-collapse: separate !important; border-spacing: 0; border: 1px solid #d8e3f0; border-radius: 12px; background-color: #f8fafc;">
+                              <tr>
+                                <td height="50" style="height: 50px; padding: 12px; vertical-align: top;">
+                                  <p class="label" style="margin: 0; font-size: 12px; color: #64748b;">Temp. ambiente</p>
+                                  <p class="value value-secondary" style="margin: 6px 0 0 0; font-size: 28px; line-height: 1; font-weight: 700; color: #334155;">__AIR_TEMP__</p>
+                                </td>
+                              </tr>
+                            </table>
+                          </td>
+                          <td class="stack-column-cell stack-column-cell-secondary" style="width: 50%; vertical-align: top; padding-left: 9px;">
+                            <table role="presentation" class="soft-card" width="100%" cellspacing="0" cellpadding="0" border="0" style="border-collapse: separate !important; border-spacing: 0; border: 1px solid #d8e3f0; border-radius: 12px; background-color: #f8fafc;">
+                              <tr>
+                                <td height="50" style="height: 50px; padding: 12px; vertical-align: top;">
+                                  <p class="label" style="margin: 0; font-size: 12px; color: #64748b;">Umidità ambiente</p>
+                                  <p class="value value-secondary" style="margin: 6px 0 0 0; font-size: 28px; line-height: 1; font-weight: 700; color: #334155;">__AIR_HUMIDITY__</p>
                                 </td>
                               </tr>
                             </table>
