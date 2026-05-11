@@ -4,6 +4,7 @@
  * Purpose: Main firmware entrypoint (sensing, display, networking, API, OTA, email).
  *
  * Changelog:
+ * - 2026-05-11: Simplified and hardened Wi-Fi/Internet management with unified reconnect flow, periodic DNS health checks, and anti-flap logic.
  * - 2026-05-11: Added email network preflight (daily Wi-Fi reconnect + internet check before email delivery attempts, including low-humidity alerts).
  * - 2026-05-11: Daily email schedule moved to 10:00 local time and email body extended with ambient temperature/humidity.
  * - 2026-05-08: Hardened Wi-Fi connectivity detection and added disconnect debounce to prevent false infinite "No WiFi. Retry..." loops.
@@ -57,6 +58,7 @@ constexpr unsigned long WIFI_DISCONNECT_DEBOUNCE_MS = 15000;             // Igno
 constexpr unsigned long WIFI_DISPLAY_IP_MS = 5000;                       // Alternate IP display every 5s
 constexpr unsigned long INTERNET_CHECK_INTERVAL_MS = 30000;              // Verify internet/DNS every 30s
 constexpr unsigned long INTERNET_RECONNECT_GRACE_MS = 60000;             // Reconnect if internet is down >60s
+constexpr uint8_t INTERNET_DNS_FAIL_THRESHOLD = 2;                       // Require 2 consecutive DNS failures before marking internet down
 constexpr unsigned long SENSOR_UPDATE_INTERVAL_MS = 5000;                // Read sensors every 5s
 constexpr unsigned long SENSOR_REFRESH_INTERVAL_MS = 5000;               // Frontend refresh interval
 constexpr unsigned long HISTORY_REFRESH_INTERVAL_MS = 60000;             // Refresh history chart every 60s
@@ -117,6 +119,7 @@ unsigned long gWifiDisconnectedSinceMs = 0;
 unsigned long gLastInternetCheckMs = 0;
 unsigned long gLastInternetOkMs = 0;
 bool gInternetReachable = false;
+uint8_t gConsecutiveDnsFailures = 0;
 
 // --- Email State ---
 int gLastDailyEmailDayKey = -1;
@@ -139,11 +142,9 @@ bool gHistoryCacheDirty = true;
  * while the station still has a valid IP lease.
  */
 bool isWifiConnected() {
-  if (WiFi.status() == WL_CONNECTED || WiFi.isConnected()) {
-    return true;
-  }
   const IPAddress ip = WiFi.localIP();
-  return ip[0] != 0 || ip[1] != 0 || ip[2] != 0 || ip[3] != 0;
+  const bool hasValidIp = (ip[0] != 0 || ip[1] != 0 || ip[2] != 0 || ip[3] != 0);
+  return (WiFi.status() == WL_CONNECTED || WiFi.isConnected()) && hasValidIp;
 }
 
 void ensureOledBus() {
@@ -576,6 +577,62 @@ bool waitForWifiConnection(unsigned long timeoutMs) {
   return isWifiConnected();
 }
 
+void clearInternetState() {
+  gInternetReachable = false;
+  gLastInternetCheckMs = 0;
+  gLastInternetOkMs = 0;
+  gConsecutiveDnsFailures = 0;
+}
+
+void beginWifiConnection(bool forceDisconnect) {
+  const unsigned long now = millis();
+  if (forceDisconnect) {
+    WiFi.disconnect();
+    delay(120);
+  }
+
+  WiFi.mode(WIFI_STA);
+  WiFi.persistent(false);
+  WiFi.setAutoReconnect(true);
+  WiFi.begin(WIFI_SSID, WIFI_PASSWORD);
+
+  gLastWifiRetryMs = now;
+  gShowWifiIp = false;
+  gLastWifiIpDisplayMs = now;
+  gWifiDisconnectedSinceMs = 0;
+  gWifiStatus = "WiFi...";
+}
+
+bool refreshInternetStatus(unsigned long nowMs, bool forceCheck, bool strictFailure = false) {
+  if (!isWifiConnected()) {
+    clearInternetState();
+    return false;
+  }
+
+  if (!forceCheck && gLastInternetCheckMs != 0 && nowMs - gLastInternetCheckMs < INTERNET_CHECK_INTERVAL_MS) {
+    return gInternetReachable;
+  }
+
+  IPAddress resendIp;
+  const int dnsResult = resolveResendHost(resendIp);
+  gLastInternetCheckMs = nowMs;
+
+  if (dnsResult == 1) {
+    gConsecutiveDnsFailures = 0;
+    gInternetReachable = true;
+    gLastInternetOkMs = nowMs;
+    return true;
+  }
+
+  if (gConsecutiveDnsFailures < 255) {
+    ++gConsecutiveDnsFailures;
+  }
+  if (strictFailure || gConsecutiveDnsFailures >= INTERNET_DNS_FAIL_THRESHOLD) {
+    gInternetReachable = false;
+  }
+  return gInternetReachable;
+}
+
 /**
  * Ensure email network preflight:
  * - Once per local day, force a fresh Wi-Fi reconnect before any email send attempt.
@@ -589,15 +646,11 @@ bool runEmailNetworkPreflight(time_t nowEpoch, const char* deliveryContext) {
   if (needReconnect) {
     gWifiStatus = "WiFi reconnect...";
     renderOled();
-    WiFi.disconnect();
-    delay(120);
-    WiFi.begin(WIFI_SSID, WIFI_PASSWORD);
+    beginWifiConnection(true);
 
     if (!waitForWifiConnection(WIFI_CONNECT_TIMEOUT_MS)) {
       gWasWifiConnected = false;
-      gInternetReachable = false;
-      gLastInternetCheckMs = 0;
-      gLastInternetOkMs = 0;
+      clearInternetState();
       gWifiStatus = "No WiFi";
       gEmailStatus = "Email no wifi";
       gLastEmailErrorDetail = String(deliveryContext) + " | reconnect timeout";
@@ -612,20 +665,16 @@ bool runEmailNetworkPreflight(time_t nowEpoch, const char* deliveryContext) {
     }
   }
 
-  IPAddress resendIp;
-  const int dnsResult = resolveResendHost(resendIp);
   const unsigned long nowMs = millis();
-  gLastInternetCheckMs = nowMs;
-  gInternetReachable = (dnsResult == 1);
-
-  if (!gInternetReachable) {
+  if (!refreshInternetStatus(nowMs, true, true)) {
+    IPAddress resendIp;
+    const int dnsResult = resolveResendHost(resendIp);
     gWifiStatus = "No internet";
     gEmailStatus = "Email no internet";
     gLastEmailErrorDetail = String(deliveryContext) + " | DNS api.resend.com failed (" + String(dnsResult) + ")";
     return false;
   }
 
-  gLastInternetOkMs = nowMs;
   gWifiStatus = "Connected";
   return true;
 }
@@ -855,29 +904,19 @@ void connectWiFi() {
   gWifiStatus = "WiFi...";
   renderOled();
 
-  WiFi.mode(WIFI_STA);
-  WiFi.begin(WIFI_SSID, WIFI_PASSWORD);
+  beginWifiConnection(false);
 
   if (waitForWifiConnection(WIFI_CONNECT_TIMEOUT_MS)) {
     gWasWifiConnected = true;
-    gShowWifiIp = false;
     const unsigned long now = millis();
-    gLastWifiIpDisplayMs = now;
-    gLastInternetCheckMs = now;
-    IPAddress resendIp;
-    gInternetReachable = (resolveResendHost(resendIp) == 1);
-    if (gInternetReachable) {
-      gLastInternetOkMs = now;
+    if (refreshInternetStatus(now, true)) {
       gWifiStatus = "Connected";
     } else {
-      gLastInternetOkMs = 0;
       gWifiStatus = "No internet";
     }
   } else {
     gWasWifiConnected = false;
-    gInternetReachable = false;
-    gLastInternetCheckMs = 0;
-    gLastInternetOkMs = 0;
+    clearInternetState();
     gWifiStatus = "No WiFi";
   }
   renderOled();
@@ -896,26 +935,18 @@ void maintainWiFi() {
       gWasWifiConnected = true;
       gShowWifiIp = false;
       gLastWifiIpDisplayMs = now;
-      gLastInternetCheckMs = 0;
-      gLastInternetOkMs = 0;
+      clearInternetState();
     }
 
-    if (gLastInternetCheckMs == 0 || now - gLastInternetCheckMs >= INTERNET_CHECK_INTERVAL_MS) {
-      gLastInternetCheckMs = now;
-      IPAddress resendIp;
-      gInternetReachable = (resolveResendHost(resendIp) == 1);
-      if (gInternetReachable) {
-        gLastInternetOkMs = now;
-      }
-    }
+    refreshInternetStatus(now, false);
 
     if (!gInternetReachable) {
       gWifiStatus = "No internet";
-      const bool shouldForceReconnect = (gLastInternetOkMs == 0) || (now - gLastInternetOkMs >= INTERNET_RECONNECT_GRACE_MS);
+      const unsigned long lastHealthyMs = (gLastInternetOkMs > 0) ? gLastInternetOkMs : gLastWifiRetryMs;
+      const bool shouldForceReconnect = (now - lastHealthyMs >= INTERNET_RECONNECT_GRACE_MS);
       if (shouldForceReconnect && now - gLastWifiRetryMs >= WIFI_RETRY_INTERVAL_MS) {
-        gLastWifiRetryMs = now;
-        WiFi.disconnect();
-        WiFi.begin(WIFI_SSID, WIFI_PASSWORD);
+        beginWifiConnection(true);
+        clearInternetState();
       }
       return;
     }
@@ -939,15 +970,9 @@ void maintainWiFi() {
   }
 
   gWasWifiConnected = false;
-  gInternetReachable = false;
-  gLastInternetCheckMs = 0;
-  gLastInternetOkMs = 0;
+  clearInternetState();
   if (now - gLastWifiRetryMs >= WIFI_RETRY_INTERVAL_MS) {
-    gLastWifiRetryMs = now;
-    gShowWifiIp = false;
-    gLastWifiIpDisplayMs = now;
-    gWifiStatus = "WiFi...";
-    WiFi.begin(WIFI_SSID, WIFI_PASSWORD);
+    beginWifiConnection(false);
   } else {
     gWifiStatus = "No WiFi. Retry...";
   }

@@ -72,7 +72,8 @@ Firmware for an **ESP8266 soil humidity monitor** with capacitive soil sensor (`
 
 - Sensor calibration: `ADC_DRY`, `ADC_WET`
 - DHT setup: `DHT_SENSOR_PIN`, `DHT_SENSOR_TYPE`
-- Intervals: `SENSOR_UPDATE_INTERVAL_MS`, `SENSOR_REFRESH_INTERVAL_MS`, `HISTORY_REFRESH_INTERVAL_MS`, `HISTORY_SAMPLE_INTERVAL_MS`, `EMAIL_RETRY_INTERVAL_MS`
+- Network intervals: `WIFI_RETRY_INTERVAL_MS`, `WIFI_CONNECT_TIMEOUT_MS`, `WIFI_DISCONNECT_DEBOUNCE_MS`, `INTERNET_CHECK_INTERVAL_MS`, `INTERNET_RECONNECT_GRACE_MS`
+- Other intervals: `SENSOR_UPDATE_INTERVAL_MS`, `SENSOR_REFRESH_INTERVAL_MS`, `HISTORY_REFRESH_INTERVAL_MS`, `HISTORY_SAMPLE_INTERVAL_MS`, `EMAIL_RETRY_INTERVAL_MS`
 - Email scheduling: `DAILY_EMAIL_HOUR`, `DAILY_EMAIL_MINUTE` (default `10:00` local time)
 - Timezone/NTP: `TZ_INFO`, `NTP_SERVER_1`, `NTP_SERVER_2`
 - Soil status thresholds: `<30` dry, `<65` medium, `>=65` wet
@@ -88,6 +89,7 @@ Firmware for an **ESP8266 soil humidity monitor** with capacitive soil sensor (`
 | Problem | Check |
 | --- | --- |
 | WiFi not connected | Verify SSID/password in `secrets.h` and use a 2.4 GHz network |
+| Device reachable only intermittently after WiFi reconnects | Update to firmware `2026.05.11+` (unified reconnect flow + periodic DNS checks with anti-flap threshold) |
 | WiFi status stuck on "No WiFi. Retry..." | Update to firmware `2026.05.08+` (Wi-Fi state detection and disconnect debounce hardened) |
 | Email not sent after overnight router/internet glitches | Firmware `2026.05.11+` forces a daily Wi-Fi reconnect and checks internet reachability before each email attempt |
 | Humidity values look wrong | Recalibrate `ADC_DRY` and `ADC_WET` for your sensor |
@@ -101,6 +103,8 @@ Firmware for an **ESP8266 soil humidity monitor** with capacitive soil sensor (`
 - Added an email network preflight that runs before delivery attempts.
 - First email attempt of each local day now forces a fresh Wi-Fi reconnect.
 - Low-humidity alert email now uses the same reconnect + internet check flow before sending.
+- Simplified and hardened runtime Wi-Fi/Internet management with a unified reconnect flow.
+- Added periodic DNS health checks with anti-flap threshold to reduce false "No internet" states.
 - Daily scheduled email time changed from 08:00 to 10:00 (local timezone).
 - Email template now includes ambient temperature and ambient humidity values.
 
