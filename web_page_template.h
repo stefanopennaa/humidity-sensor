@@ -201,6 +201,8 @@ const char HOMEPAGE_TEMPLATE[] PROGMEM = R"rawliteral(
         background: rgba(239, 68, 68, 0.2);
       }
 
+
+
       .last-update {
         margin-top: 18px;
         font-size: 0.78rem;

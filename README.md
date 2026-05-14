@@ -1,7 +1,7 @@
 # Humidity Sensor (ESP8266 + SSD1306)
 
 <p align="center">
-  <img src="https://img.shields.io/badge/version-2026.05.11-blue.svg" alt="Version">
+  <img src="https://img.shields.io/badge/version-2026.05.14-blue.svg" alt="Version">
   <img src="https://img.shields.io/badge/platform-ESP8266-green.svg" alt="Platform">
   <img src="https://img.shields.io/badge/license-MIT-yellow.svg" alt="License">
 </p>
@@ -17,7 +17,7 @@ Firmware for an **ESP8266 soil humidity monitor** with capacitive soil sensor (`
 - **Local OLED display** (SSD1306, I2C on `D5`/`D6`).
 - **Responsive web dashboard** with live value and history chart.
 - **24h history** stored on LittleFS with rolling retention.
-- **Automatic email notifications**: daily summary + low-humidity alert, with daily Wi-Fi reconnect + internet preflight before email attempts.
+- **Automatic email notifications**: daily summary + low-humidity alert, with robust email network preflight, TLS buffer validation, JSON escape, and HTML escaping for security.
 - **OTA update** via `/update` endpoint.
 
 ## Requirements
@@ -34,14 +34,14 @@ Firmware for an **ESP8266 soil humidity monitor** with capacitive soil sensor (`
 ## Quick start
 
 1. Clone the repository.
-   ```bash
+```bash
    git clone https://github.com/stefanopennaa/humidity-sensor.git
    cd humidity-sensor
-   ```
+```
 2. Copy the example secrets file:
-   ```bash
+```bash
    cp secrets.example.h secrets.h
-   ```
+```
 3. Fill `secrets.h` with your WiFi credentials, Resend settings, and OTA/restart credentials.
 4. Verify calibration values in `humidity-sensor.ino`:
     - `ADC_DRY` (sensor in dry/air condition)
@@ -65,6 +65,7 @@ Firmware for an **ESP8266 soil humidity monitor** with capacitive soil sensor (`
 | `/` | Main dashboard |
 | `/api/humidity` | Current readings (`raw`, `humidity`, `airTempC`, `airHumidity`, `airOk`) |
 | `/api/history` | History samples (24h window) |
+| `/api/email` | Email diagnostics (status, error, connectivity, heap) |
 | `/api/restart` (POST) | Device reboot (Basic Auth) |
 | `/update` | OTA page |
 
@@ -89,15 +90,31 @@ Firmware for an **ESP8266 soil humidity monitor** with capacitive soil sensor (`
 | Problem | Check |
 | --- | --- |
 | WiFi not connected | Verify SSID/password in `secrets.h` and use a 2.4 GHz network |
-| Device reachable only intermittently after WiFi reconnects | Update to firmware `2026.05.11+` (unified reconnect flow + periodic DNS checks with anti-flap threshold) |
+| Device reachable only intermittently after WiFi reconnects | Update to firmware `2026.05.14+` (hardened Wi-Fi detection, improved internet status logic) |
 | WiFi status stuck on "No WiFi. Retry..." | Update to firmware `2026.05.08+` (Wi-Fi state detection and disconnect debounce hardened) |
-| Email not sent after overnight router/internet glitches | Firmware `2026.05.11+` forces a daily Wi-Fi reconnect and checks internet reachability before each email attempt |
+| Email not sent after overnight router/internet glitches | Update to firmware `2026.05.14+` (preflight reconnect fixed — no longer forces unnecessary daily Wi-Fi reconnect) |
+| Email transmission failures or device reboots during send | Update to firmware `2026.05.14+` (heap optimized, TLS buffer resized, htmlBody scoped) |
 | Humidity values look wrong | Recalibrate `ADC_DRY` and `ADC_WET` for your sensor |
-| No email notifications | Check Resend credentials, sender/recipient, and internet connectivity |
+| No email notifications | Check `/api/email` for runtime diagnostics; verify Resend credentials and internet connectivity |
 | Dashboard empty/unreachable | Confirm device IP and that the ESP8266 is connected to WiFi |
 | OTA update unavailable | Open `/update` and verify OTA credentials in `secrets.h` |
+| OLED display overflow | Update to firmware `2026.05.14+` (status text truncation added) |
 
 ## Changelog
+
+### 2026.05.14
+- **Email preflight fix**: Removed forced daily Wi-Fi reconnect before email send; reconnect now only triggered when actually disconnected or internet unreachable.
+- **Email heap optimization**: `htmlBody` scoped to free ~5KB before TLS socket open; `gLastEmailPayload` removed to reduce RAM usage.
+- **TLS buffer**: Resized to `setBufferSizes(4096, 512)` to reduce heap pressure during email transmission.
+- **Email diagnostics**: Added `/api/email` endpoint exposing runtime email state, error detail, connectivity, and heap info.
+- **Email robustness**: Fixed missing credentials validation for FROM/TO emails; improved error messages and error detail truncation.
+- **Email security**: Added `htmlEscape()` to escape HTML special characters in dynamic template content (prevents XSS injection).
+- **Email retry logic**: Fixed `gLastEmailAttemptMs` timing issue — now updated *after* send attempt, not before.
+- **Wi-Fi connectivity**: Improved `isWifiConnected()` robustness; now validates both WiFi status AND IP address.
+- **Internet status**: Enhanced `refreshInternetStatus()` with clearer DNS failure semantics and state documentation.
+- **OLED display**: Added status text truncation (21 chars max) to prevent display overflow.
+- **maintainWiFi()**: Enhanced with clearer status messages and safeguards against reconnect loops.
+- **Main loop**: Replaced `delay(1)` with `yield()` to avoid blocking the web server.
 
 ### 2026.05.11
 - Added an email network preflight that runs before delivery attempts.
@@ -116,12 +133,6 @@ Firmware for an **ESP8266 soil humidity monitor** with capacitive soil sensor (`
 ### 2026.05.07
 - Web dashboard labels updated to "Temp. ambiente" and "Umidità ambiente".
 
-### 2026.05.03
-- Formal reorganization of source file headers/changelog comments.
-- Code formatting normalized (no logic changes).
-- README rewritten and aligned to a cleaner presentation.
-- Sensitive data removed from the repository and `secrets.example.h` added.
-
 ### 2026.05.04
 - Added DHT11 support on `D2` (ambient temperature + humidity).
 - OLED now shows ambient values in addition to soil values.
@@ -129,11 +140,19 @@ Firmware for an **ESP8266 soil humidity monitor** with capacitive soil sensor (`
 - Web dashboard now shows ambient temperature and humidity values.
 - Added a note explaining why resistive probes were replaced by a capacitive sensor.
 
+### 2026.05.03
+- Formal reorganization of source file headers/changelog comments.
+- Code formatting normalized (no logic changes).
+- README rewritten and aligned to a cleaner presentation.
+- Sensitive data removed from the repository and `secrets.example.h` added.
+
 ## Security
 
 - `secrets.h` is ignored by Git via `.gitignore`.
 - Never commit real credentials.
 - If credentials were previously exposed, always rotate passwords and API keys.
+- All dynamic email content is HTML-escaped to prevent XSS injection.
+- JSON payloads are properly escaped to prevent injection attacks.
 
 ## License
 

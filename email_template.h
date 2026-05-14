@@ -8,6 +8,7 @@
  * Purpose: HTML email template with placeholders for runtime sensor data.
  *
  * Changelog:
+ * - 2026-05-14: Email security hardened with HTML escaping for dynamic content to prevent XSS injection.
  * - 2026-05-11: Added ambient temperature/humidity cards to email template.
  * - 2026-05-03: Reorganized header comments and standardized formatting (form only).
  */
