@@ -163,12 +163,6 @@ const char HOMEPAGE_TEMPLATE[] PROGMEM = R"rawliteral(
         display: block;
       }
 
-      #historyInfo {
-        margin-top: 12px;
-        font-size: 0.78rem;
-        color: var(--muted);
-      }
-
       .actions {
         margin-top: 18px;
         display: flex;
@@ -207,11 +201,6 @@ const char HOMEPAGE_TEMPLATE[] PROGMEM = R"rawliteral(
         margin-top: 18px;
         font-size: 0.78rem;
         color: var(--muted);
-      }
-
-      .card-history #historyInfo {
-        margin-top: auto;
-        padding-top: 12px;
       }
 
       @media (max-width: 640px) {
@@ -322,13 +311,11 @@ const char HOMEPAGE_TEMPLATE[] PROGMEM = R"rawliteral(
           <a class="btn" href="/update">OTA Update</a>
           <button class="btn" id="restartBtn" type="button">Restart ESP</button>
         </div>
-        <div class="last-update" id="stateText"></div>
       </div>
 
       <div class="card card-history">
         <p class="chart-title">Storico umidità (ultime 24h)</p>
         <svg id="historyChart" viewBox="0 0 320 160" preserveAspectRatio="none" aria-label="Grafico storico umidità"></svg>
-        <div id="historyInfo">Storico: in caricamento...</div>
       </div>
     </div>
     <script>
@@ -384,7 +371,6 @@ const char HOMEPAGE_TEMPLATE[] PROGMEM = R"rawliteral(
 
       function drawHistoryChart(points) {
         const svg = document.getElementById('historyChart');
-        const info = document.getElementById('historyInfo');
         const width = 320;
         const height = 160;
         // Keep drawing math explicit: margins define a stable plot area for axes + labels.
@@ -394,7 +380,6 @@ const char HOMEPAGE_TEMPLATE[] PROGMEM = R"rawliteral(
 
         if (!Array.isArray(points) || points.length < 2) {
           svg.innerHTML = '';
-          info.textContent = 'Storico: dati insufficienti';
           return;
         }
 
@@ -428,8 +413,6 @@ const char HOMEPAGE_TEMPLATE[] PROGMEM = R"rawliteral(
         const endLabel = lastDate.toLocaleDateString('it-IT', { day: 'numeric', month: 'numeric' }) + ' ' +
           lastDate.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
 
-        info.textContent = '';
-
         svg.innerHTML =
           '<rect x="0" y="0" width="' + width + '" height="' + height + '" fill="transparent"></rect>' +
           yTickSvg +
@@ -441,7 +424,6 @@ const char HOMEPAGE_TEMPLATE[] PROGMEM = R"rawliteral(
       }
 
       async function refreshHistory() {
-        const info = document.getElementById('historyInfo');
         try {
           const response = await fetch('/api/history');
           if (!response.ok) {
@@ -453,7 +435,7 @@ const char HOMEPAGE_TEMPLATE[] PROGMEM = R"rawliteral(
           }
           drawHistoryChart(data.points || []);
         } catch (error) {
-          info.textContent = 'Storico: errore caricamento';
+          document.getElementById('historyChart').innerHTML = '';
         }
       }
 
