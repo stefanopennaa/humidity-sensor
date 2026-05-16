@@ -322,7 +322,7 @@ const char HOMEPAGE_TEMPLATE[] PROGMEM = R"rawliteral(
           <a class="btn" href="/update">OTA Update</a>
           <button class="btn" id="restartBtn" type="button">Restart ESP</button>
         </div>
-        <div class="last-update" id="stateText">Ultimo aggiornamento: in attesa...</div>
+        <div class="last-update" id="stateText"></div>
       </div>
 
       <div class="card card-history">
@@ -375,7 +375,7 @@ const char HOMEPAGE_TEMPLATE[] PROGMEM = R"rawliteral(
             (airOk && Number.isFinite(airHumidity)) ? airHumidity.toFixed(0) + ' %' : '--';
           document.getElementById('bar').style.width = Math.max(0, Math.min(100, humidity)) + '%';
           updateLevel(humidity);
-          stateText.textContent = 'Ultimo aggiornamento: ' + new Date().toLocaleTimeString();
+          stateText.textContent = '';
 
         } catch (error) {
           stateText.textContent = 'Errore aggiornamento dati';
@@ -428,7 +428,7 @@ const char HOMEPAGE_TEMPLATE[] PROGMEM = R"rawliteral(
         const endLabel = lastDate.toLocaleDateString('it-IT', { day: 'numeric', month: 'numeric' }) + ' ' +
           lastDate.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
 
-        info.textContent = 'Ultimo campione: ' + lastDate.toLocaleString();
+        info.textContent = '';
 
         svg.innerHTML =
           '<rect x="0" y="0" width="' + width + '" height="' + height + '" fill="transparent"></rect>' +

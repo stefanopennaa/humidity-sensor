@@ -8,6 +8,8 @@
 
 Firmware for an **ESP8266 soil humidity monitor** with capacitive soil sensor (`A0`), DHT11 ambient sensor (`D2`), SSD1306 OLED output, responsive web dashboard, 24h history, automatic email alerts, and OTA updates.
 
+![](./humidity-sensor.png)
+
 > Hobby project (AI-assisted), use at your own risk.
 
 ## Overview
