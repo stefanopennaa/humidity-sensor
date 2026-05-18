@@ -87,6 +87,10 @@ const char* TZ_INFO = "CET-1CEST,M3.5.0/2,M10.5.0/3";  // Italy timezone
 const char* RESEND_SUBJECT = "🌱 Lo stato della tua pianta";
 const char* RESEND_URGENT_SUBJECT = "⚠️ Umidità sotto 30%: intervento necessario";
 const char* RESEND_ENDPOINT = "https://api.resend.com/emails";
+constexpr uint32_t EMAIL_MIN_FREE_HEAP_BYTES = 12000;  // Safety floor before TLS/email send
+constexpr uint16_t TLS_RX_BUFFER_PRIMARY = 4096;
+constexpr uint16_t TLS_RX_BUFFER_FALLBACK = 2048;
+constexpr uint16_t TLS_TX_BUFFER = 512;
 
 // ============================================================================
 // HARDWARE INITIALIZATION
@@ -654,17 +658,15 @@ bool refreshInternetStatus(unsigned long nowMs, bool forceCheck, bool strictFail
 
 /**
  * Run email network preflight with safeguards against reconnect loops.
- * - Once per local day, force a fresh Wi-Fi reconnect before any email send attempt.
+ * - Reconnect Wi-Fi only when disconnected or internet is unreachable.
  * - Always verify internet reachability (DNS) right before the email request.
- * - Limits reconnect attempts to prevent infinite loops.
+ * - Keep a local-day preflight key to avoid repeated same-day preflight transitions.
  */
 bool runEmailNetworkPreflight(time_t nowEpoch, const char* deliveryContext) {
   const int dayKey = buildLocalDayKey(nowEpoch);
   const bool shouldDailyReconnect = (dayKey >= 0) && (dayKey != gLastEmailNetworkPreflightDayKey);
 
-  // Riconnetti solo se davvero non sei connesso o internet è irraggiungibile.
-  // La riconnessione forzata giornaliera causava fallimenti inutili quando
-  // il Wi-Fi era già stabile.
+  // Reconnect only when actually needed.
   const bool needReconnect = !isWifiConnected() || !gInternetReachable;
 
   if (needReconnect) {
@@ -686,7 +688,7 @@ bool runEmailNetworkPreflight(time_t nowEpoch, const char* deliveryContext) {
     gLastWifiIpDisplayMs = millis();
   }
 
-  // Aggiorna il day key indipendentemente dal fatto che abbia riconnesso.
+  // Mark preflight done for this local day even if no reconnect was needed.
   if (shouldDailyReconnect) {
     gLastEmailNetworkPreflightDayKey = dayKey;
   }
@@ -761,6 +763,10 @@ String htmlEscape(const String& input) {
     }
   }
   return out;
+}
+
+bool hasEnoughHeapForEmail() {
+  return ESP.getFreeHeap() >= EMAIL_MIN_FREE_HEAP_BYTES;
 }
 
 /**
@@ -843,6 +849,12 @@ bool sendDailyUpdateEmail(time_t nowEpoch, const char* subject, const char* emai
     payload += "}";
   }  // htmlBody distrutta qui, ~5KB liberati prima del socket TLS
 
+  if (!hasEnoughHeapForEmail()) {
+    gEmailStatus = "Email err: heap";
+    gLastEmailErrorDetail = "freeHeap:" + String(ESP.getFreeHeap());
+    return false;
+  }
+
   IPAddress resendIp;
   const int dnsResult = resolveResendHost(resendIp);
   const String dnsInfo = (dnsResult == 1) ? resendIp.toString() : ("lookup_failed(" + String(dnsResult) + ")");
@@ -851,9 +863,16 @@ bool sendDailyUpdateEmail(time_t nowEpoch, const char* subject, const char* emai
   String responseBody = "";
   bool beginFailed = false;
   for (uint8_t attempt = 0; attempt < 2; ++attempt) {
+    if (!hasEnoughHeapForEmail()) {
+      gEmailStatus = "Email err: heap";
+      gLastEmailErrorDetail = "freeHeap:" + String(ESP.getFreeHeap());
+      return false;
+    }
+
+    const uint16_t tlsRxBuffer = (attempt == 0) ? TLS_RX_BUFFER_PRIMARY : TLS_RX_BUFFER_FALLBACK;
     BearSSL::WiFiClientSecure client;
     client.setInsecure();
-    client.setBufferSizes(4096, 512);
+    client.setBufferSizes(tlsRxBuffer, TLS_TX_BUFFER);
     client.setTimeout(15000);
 
     HTTPClient http;
@@ -868,7 +887,11 @@ bool sendDailyUpdateEmail(time_t nowEpoch, const char* subject, const char* emai
       http.addHeader("Authorization", "Bearer " + String(RESEND_API_KEY));
       http.addHeader("User-Agent", "humidity-sensor-esp8266/1.0");
       httpCode = http.POST(payload);
-      responseBody = http.getString();
+      if (ESP.getFreeHeap() >= EMAIL_MIN_FREE_HEAP_BYTES + 3000) {
+        responseBody = http.getString();
+      } else {
+        responseBody = "response_skipped_low_heap";
+      }
       http.end();
     }
 
@@ -913,9 +936,16 @@ bool sendMinimalTestEmail() {
   String responseBody = "";
   bool beginFailed = false;
   for (uint8_t attempt = 0; attempt < 2; ++attempt) {
+    if (!hasEnoughHeapForEmail()) {
+      gEmailStatus = "Email err: heap";
+      gLastEmailErrorDetail = "freeHeap:" + String(ESP.getFreeHeap());
+      return false;
+    }
+
+    const uint16_t tlsRxBuffer = (attempt == 0) ? TLS_RX_BUFFER_PRIMARY : TLS_RX_BUFFER_FALLBACK;
     BearSSL::WiFiClientSecure client;
     client.setInsecure();
-    client.setBufferSizes(4096, 512);
+    client.setBufferSizes(tlsRxBuffer, TLS_TX_BUFFER);
     client.setTimeout(15000);
 
     HTTPClient http;
@@ -930,7 +960,11 @@ bool sendMinimalTestEmail() {
       http.addHeader("Authorization", "Bearer " + String(RESEND_API_KEY));
       http.addHeader("User-Agent", "humidity-sensor-esp8266/1.0");
       httpCode = http.POST(payload);
-      responseBody = http.getString();
+      if (ESP.getFreeHeap() >= EMAIL_MIN_FREE_HEAP_BYTES + 3000) {
+        responseBody = http.getString();
+      } else {
+        responseBody = "response_skipped_low_heap";
+      }
       http.end();
     }
 
@@ -1138,13 +1172,16 @@ void setupWebServer() {
 
   server.on("/api/email", []() {
     String json = "{";
-    json += "\"status\":\"" + gEmailStatus + "\",";
-    json += "\"error\":\"" + gLastEmailErrorDetail + "\",";
+    json += "\"status\":\"" + jsonEscape(gEmailStatus) + "\",";
+    json += "\"error\":\"" + jsonEscape(gLastEmailErrorDetail) + "\",";
     json += "\"humidity\":" + String(gHumidityPercent) + ",";
     json += "\"belowThreshold\":" + String(gWasBelowLowHumidityThreshold ? "true" : "false") + ",";
     json += "\"timeSynced\":" + String(isTimeSynced() ? "true" : "false") + ",";
     json += "\"wifiConnected\":" + String(isWifiConnected() ? "true" : "false") + ",";
     json += "\"internetReachable\":" + String(gInternetReachable ? "true" : "false") + ",";
+    json += "\"freeHeap\":" + String(ESP.getFreeHeap()) + ",";
+    json += "\"heapFragmentation\":" + String(ESP.getHeapFragmentation()) + ",";
+    json += "\"maxFreeBlock\":" + String(ESP.getMaxFreeBlockSize()) + ",";
     json += "\"lastAttemptMs\":" + String(gLastEmailAttemptMs) + ",";
     json += "\"nowMs\":" + String(millis());
     json += "}";

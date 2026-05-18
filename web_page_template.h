@@ -311,6 +311,8 @@ const char HOMEPAGE_TEMPLATE[] PROGMEM = R"rawliteral(
           <a class="btn" href="/update">OTA Update</a>
           <button class="btn" id="restartBtn" type="button">Restart ESP</button>
         </div>
+
+        <div class="state" id="stateText" aria-live="polite"></div>
       </div>
 
       <div class="card card-history">
