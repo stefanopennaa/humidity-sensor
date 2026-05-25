@@ -20,6 +20,8 @@ Firmware for an **ESP8266 soil humidity monitor** with capacitive soil sensor (`
 >
 > They sent me a free sample of a self-designed 3D shield for the ESP8266, which I used to create a compact and robust enclosure for this project.
 
+> Hobby project (AI-assisted), use at your own risk.
+
 ## Web Dashboard
 
 ![Web Dashboard](./img/web_dashboard.png)
