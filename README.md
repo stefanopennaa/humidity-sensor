@@ -8,9 +8,21 @@
 
 Firmware for an **ESP8266 soil humidity monitor** with capacitive soil sensor (`A0`), DHT11 ambient sensor (`D2`), SSD1306 OLED output, responsive web dashboard, 24h history, automatic email alerts, and OTA updates.
 
-![](./humidity-sensor.png)
+> [PCBWay](https://www.pcbway.com/) offers high-quality PCB manufacturing and assembly services at competitive prices, with excellent support for makers and small businesses. Check them out for your next build!
+>
+> <table>
+>   <tr>
+>     <td><img src="./img/PCBWay_1.png" alt="PCBWay Shield"></td>
+>     <td><img src="./img/PCBWay_2.png" alt="PCBWay Shield"></td>
+>     <td><img src="./img/PCBWay_3.png" alt="PCBWay Shield"></td>
+>   </tr>
+> </table>
+>
+> They sent me a free sample of a self-designed 3D shield for the ESP8266, which I used to create a compact and robust enclosure for this project.
 
-> Hobby project (AI-assisted), use at your own risk.
+## Web Dashboard
+
+![Web Dashboard](./img/web_dashboard.png)
 
 ## Overview
 
@@ -164,3 +176,5 @@ MIT, see [LICENSE](LICENSE).
 
 - Issue tracker: [GitHub Issues](https://github.com/stefanopennaa/humidity-sensor/issues)
 - Email: stefano@stefanopenna.it
+
+Again, thanks to [PCBWay](https://www.pcbway.com/) for sponsoring this project and providing the custom ESP8266 shield! If you're looking for affordable, high-quality PCB manufacturing and assembly, definitely check them out.
