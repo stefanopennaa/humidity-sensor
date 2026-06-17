@@ -15,6 +15,7 @@ Firmware for an **ESP8266 soil humidity monitor** with capacitive soil sensor (`
 >     <td><img src="./img/PCBWay_1.png" alt="PCBWay Shield"></td>
 >     <td><img src="./img/PCBWay_2.png" alt="PCBWay Shield"></td>
 >     <td><img src="./img/PCBWay_3.png" alt="PCBWay Shield"></td>
+>     <td><img src="./img/PCBWay_4.png" alt="PCBWay Shield"></td>
 >   </tr>
 > </table>
 >
