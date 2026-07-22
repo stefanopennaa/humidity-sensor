@@ -209,7 +209,7 @@ const char EMAIL_TEMPLATE[] PROGMEM = R"rawliteral(
                     <td class="mobile-padding footer" style="padding: 14px 24px; border-top: 1px solid #d8e3f0; background-color: #f8fafc; border-radius: 0 0 18px 18px;">
                       <p class="footer-text" style="margin: 0; font-size: 12px; line-height: 18px; color: #64748b;">
                         __DELIVERY_CONTEXT__ •
-                        <a class="link" href="mailto:alerts@example.com" style="color: #2c7be5; text-decoration: none;">alerts@example.com</a>
+                        <a class="link" href="mailto:alerts@stefanopenna.it" style="color: #2c7be5; text-decoration: none;">alerts@stefanopenna.it</a>
                       </p>
                     </td>
                   </tr>
