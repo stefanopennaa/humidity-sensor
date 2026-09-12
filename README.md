@@ -1,12 +1,12 @@
 # Humidity Sensor (ESP8266 + SSD1306)
 
 <p align="center">
-  <img src="https://img.shields.io/badge/version-2026.05.14-blue.svg" alt="Version">
+  <img src="https://img.shields.io/badge/version-2026.09.12-blue.svg" alt="Version">
   <img src="https://img.shields.io/badge/platform-ESP8266-green.svg" alt="Platform">
   <img src="https://img.shields.io/badge/license-MIT-yellow.svg" alt="License">
 </p>
 
-Firmware for an **ESP8266 soil humidity monitor** with capacitive soil sensor (`A0`), DHT11 ambient sensor (`D2`), SSD1306 OLED output, responsive web dashboard, 24h history, automatic email alerts, and OTA updates.
+Firmware for an **ESP8266 soil humidity monitor** with capacitive soil sensor (`A0`), DHT11 ambient sensor (`D2`), SSD1306 OLED output, responsive web dashboard, 7-day history, automatic email alerts, and OTA updates.
 
 > [PCBWay](https://www.pcbway.com/) offers high-quality PCB manufacturing and assembly services at competitive prices, with excellent support for makers and small businesses. Check them out for your next build!
 >
@@ -33,8 +33,8 @@ Firmware for an **ESP8266 soil humidity monitor** with capacitive soil sensor (`
 - **Ambient reading** from DHT11 on `D2` (temperature + RH%).
 - **Local OLED display** (SSD1306, I2C on `D5`/`D6`).
 - **Responsive web dashboard** with live value and history chart.
-- **24h history** stored on LittleFS with rolling retention.
-- **Automatic email notifications**: daily summary + low-humidity alert, with robust email network preflight, TLS buffer validation, JSON escape, and HTML escaping for security.
+- **7-day history** stored on LittleFS with rolling retention.
+- **Automatic email notifications**: daily summary + low-humidity alert, with independent retry state, hysteresis (`<30%` trigger, `>=35%` reset), robust email network preflight, TLS buffer validation, JSON escape, and HTML escaping for security.
 - **OTA update** via `/update` endpoint.
 
 ## Requirements
@@ -81,7 +81,7 @@ Firmware for an **ESP8266 soil humidity monitor** with capacitive soil sensor (`
 | --- | --- |
 | `/` | Main dashboard |
 | `/api/humidity` | Current readings (`raw`, `humidity`, `airTempC`, `airHumidity`, `airOk`) |
-| `/api/history` | History samples (24h window) |
+| `/api/history` | History samples (7-day window, capped to 288 points) |
 | `/api/email` | Email diagnostics (status, error, connectivity, heap) |
 | `/api/restart` (POST) | Device reboot (Basic Auth) |
 | `/update` | OTA page |
@@ -92,14 +92,16 @@ Firmware for an **ESP8266 soil humidity monitor** with capacitive soil sensor (`
 - DHT setup: `DHT_SENSOR_PIN`, `DHT_SENSOR_TYPE`
 - Network intervals: `WIFI_RETRY_INTERVAL_MS`, `WIFI_CONNECT_TIMEOUT_MS`, `WIFI_DISCONNECT_DEBOUNCE_MS`, `INTERNET_CHECK_INTERVAL_MS`, `INTERNET_RECONNECT_GRACE_MS`
 - Other intervals: `SENSOR_UPDATE_INTERVAL_MS`, `SENSOR_REFRESH_INTERVAL_MS`, `HISTORY_REFRESH_INTERVAL_MS`, `HISTORY_SAMPLE_INTERVAL_MS`, `EMAIL_RETRY_INTERVAL_MS`
+- History limits: `HISTORY_MAX_SAMPLES`, `HISTORY_API_MAX_SAMPLES`, `HISTORY_API_WINDOW_SECONDS`
 - Email scheduling: `DAILY_EMAIL_HOUR`, `DAILY_EMAIL_MINUTE` (default `10:00` local time)
+- Low-humidity alert: `LOW_HUMIDITY_ALERT_TRIGGER_PERCENT`, `LOW_HUMIDITY_ALERT_RESET_PERCENT`
 - Timezone/NTP: `TZ_INFO`, `NTP_SERVER_1`, `NTP_SERVER_2`
 - Soil status thresholds: `<30` dry, `<65` medium, `>=65` wet
 
 ## Known limitations
 
 - Email delivery depends on internet connectivity and DNS resolution for `api.resend.com`.
-- History retention is limited by `HISTORY_MAX_SAMPLES` and the 24h API window.
+- History retention is limited by `HISTORY_MAX_SAMPLES` and the 7-day API window.
 - Measurement quality depends on real-world sensor calibration in your setup.
 
 ## Quick troubleshooting
@@ -118,6 +120,11 @@ Firmware for an **ESP8266 soil humidity monitor** with capacitive soil sensor (`
 | OLED display overflow | Update to firmware `2026.05.14+` (status text truncation added) |
 
 ## Changelog
+
+### 2026.09.12
+- **Low humidity alert anti-spam**: Added hysteresis for dry alerts (`<30%` trigger, reset only at `>=35%`) to avoid repeated emails during threshold oscillations.
+- **Email retry state refactor**: Daily summary and low-humidity alerts now use independent retry state so one flow cannot block or spam the other.
+- **Weekly chart window**: History sampling moved to ~35 minutes with unchanged API cap (`288` points), extending dashboard history to ~7 days without extra RAM pressure.
 
 ### 2026.05.14
 - **Email preflight fix**: Removed forced daily Wi-Fi reconnect before email send; reconnect now only triggered when actually disconnected or internet unreachable.

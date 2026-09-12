@@ -4,10 +4,9 @@
  * Purpose: Main firmware entrypoint (sensing, display, networking, API, OTA, email).
  *
  * Changelog:
- * - 2026.05.14: Internet recovery fixed — tickWiFiRetry now reconnects on bootState==BOOT_WIFI even if WiFi is up, and calls refreshAfterInternetRecovery directly after recovery.
- * - 2026-05-11: Simplified and hardened Wi-Fi/Internet management with unified reconnect flow, periodic DNS health checks, and anti-flap logic.
- * - 2026-05-11: Added email network preflight (daily Wi-Fi reconnect + internet check before email delivery attempts, including low-humidity alerts).
- * - 2026-05-11: Daily email schedule moved to 10:00 local time and email body extended with ambient temperature/humidity.
+ * - 2026-09-12: Email alerts now use low-humidity hysteresis and independent retry state; history sampling and API filtering cover a seven-day window with a 288-point cap.
+ * - 2026-05-14: Fixed internet recovery and email retry behavior; hardened Wi-Fi status, email preflight, TLS memory usage, diagnostics, and dynamic-content escaping.
+ * - 2026-05-11: Added email network preflight, periodic DNS health checks, anti-flap logic, the 10:00 local daily schedule, and ambient values in email notifications.
  * - 2026-05-08: Hardened Wi-Fi connectivity detection and added disconnect debounce to prevent false infinite "No WiFi. Retry..." loops.
  * - 2026-05-07: Updated web dashboard ambient labels ("Temp. ambiente", "Umidità ambiente").
  * - 2026-05-04: Added DHT11 on D2, extended /api/humidity with ambient fields, and updated OLED layout (Temp/Humi).
@@ -66,10 +65,10 @@ constexpr unsigned long HISTORY_REFRESH_INTERVAL_MS = 60000;             // Refr
 constexpr unsigned long EMAIL_RETRY_INTERVAL_MS = 10UL * 60UL * 1000UL;  // Retry email after 10min
 
 // --- History Storage ---
-constexpr unsigned long HISTORY_SAMPLE_INTERVAL_MS = 5UL * 60UL * 1000UL;  // Sample every 5min
-constexpr size_t HISTORY_MAX_SAMPLES = 1000;                               // Max samples in flash (rolling window)
-constexpr size_t HISTORY_API_MAX_SAMPLES = 288;                            // Max samples returned by API (~24h at 5min)
-constexpr uint32_t HISTORY_API_WINDOW_SECONDS = 24UL * 60UL * 60UL;        // 24 hour window
+constexpr unsigned long HISTORY_SAMPLE_INTERVAL_MS = 35UL * 60UL * 1000UL;  // Sample every 35min (~288 points/week)
+constexpr size_t HISTORY_MAX_SAMPLES = 1000;                                // Max samples in flash (rolling window)
+constexpr size_t HISTORY_API_MAX_SAMPLES = 288;                             // Max samples returned by API (~week at 35min)
+constexpr uint32_t HISTORY_API_WINDOW_SECONDS = 7UL * 24UL * 60UL * 60UL;   // 7 day window
 const char* HISTORY_FILE_PATH = "/humidity_history.csv";
 const char* HISTORY_TMP_FILE_PATH = "/humidity_history.tmp";
 
@@ -91,6 +90,8 @@ constexpr uint32_t EMAIL_MIN_FREE_HEAP_BYTES = 12000;  // Safety floor before TL
 constexpr uint16_t TLS_RX_BUFFER_PRIMARY = 4096;
 constexpr uint16_t TLS_RX_BUFFER_FALLBACK = 2048;
 constexpr uint16_t TLS_TX_BUFFER = 512;
+constexpr uint8_t LOW_HUMIDITY_ALERT_TRIGGER_PERCENT = 30;  // Enter dry alert below this value
+constexpr uint8_t LOW_HUMIDITY_ALERT_RESET_PERCENT = 35;    // Exit dry alert only above this value (hysteresis)
 
 // ============================================================================
 // HARDWARE INITIALIZATION
@@ -127,12 +128,12 @@ bool gInternetReachable = false;
 uint8_t gConsecutiveDnsFailures = 0;
 
 // --- Email State ---
-int gLastDailyEmailDayKey = -1;
-int gLastEmailNetworkPreflightDayKey = -1;
-unsigned long gLastEmailAttemptMs = 0;
+int gLastDailySummarySentDayKey = -1;
+unsigned long gLastDailySummaryAttemptMs = 0;
+unsigned long gLastLowHumidityAlertAttemptMs = 0;
 String gEmailStatus = "Email idle";
 String gLastEmailErrorDetail = "";
-bool gWasBelowLowHumidityThreshold = false;
+bool gLowHumidityAlertActive = false;
 
 // --- History State ---
 unsigned long gLastHistorySampleMs = 0;
@@ -416,7 +417,7 @@ void maybeStoreHistorySample() {
 
 /**
  * Build JSON payload for humidity history chart.
- * Includes up to HISTORY_API_MAX_SAMPLES within last 24h when time is synced.
+ * Includes up to HISTORY_API_MAX_SAMPLES within the last 7 days when time is synced.
  */
 String buildHistoryJson() {
   if (!gHistoryFsReady) {
@@ -425,15 +426,15 @@ String buildHistoryJson() {
 
   const time_t nowEpoch = time(nullptr);
   // If NTP is not ready yet, we keep serving recent samples without applying a time window.
-  const bool canFilterLast24h = (nowEpoch > 0) && isTimeSynced();
-  const time_t minEpoch = canFilterLast24h ? (nowEpoch - static_cast<time_t>(HISTORY_API_WINDOW_SECONDS)) : 0;
+  const bool canFilterWindow = (nowEpoch > 0) && isTimeSynced();
+  const time_t minEpoch = canFilterWindow ? (nowEpoch - static_cast<time_t>(HISTORY_API_WINDOW_SECONDS)) : 0;
 
   File inputCount = LittleFS.open(HISTORY_FILE_PATH, "r");
   if (!inputCount) {
     return "{\"ok\":false,\"reason\":\"history_open_failed\",\"points\":[]}";
   }
 
-  // Pass 1: count eligible rows so we can apply a stable "latest N" cap after 24h filtering.
+  // Pass 1: count eligible rows so we can apply a stable "latest N" cap after window filtering.
   size_t eligibleLines = 0;
   while (inputCount.available()) {
     String line = inputCount.readStringUntil('\n');
@@ -454,7 +455,7 @@ String buildHistoryJson() {
     }
 
     const time_t sampleEpoch = static_cast<time_t>(epoch.toInt());
-    if (canFilterLast24h && sampleEpoch < minEpoch) {
+    if (canFilterWindow && sampleEpoch < minEpoch) {
       yield();
       continue;
     }
@@ -496,7 +497,7 @@ String buildHistoryJson() {
     }
 
     const time_t sampleEpoch = static_cast<time_t>(epoch.toInt());
-    if (canFilterLast24h && sampleEpoch < minEpoch) {
+    if (canFilterWindow && sampleEpoch < minEpoch) {
       yield();
       continue;
     }
@@ -528,7 +529,7 @@ String buildHistoryJson() {
 }
 
 /**
- * Handle GET /api/history → return 24h history as JSON.
+ * Handle GET /api/history -> return the last seven days of history as JSON.
  */
 void handleHistoryApi() {
   const unsigned long nowMs = millis();
@@ -660,12 +661,8 @@ bool refreshInternetStatus(unsigned long nowMs, bool forceCheck, bool strictFail
  * Run email network preflight with safeguards against reconnect loops.
  * - Reconnect Wi-Fi only when disconnected or internet is unreachable.
  * - Always verify internet reachability (DNS) right before the email request.
- * - Keep a local-day preflight key to avoid repeated same-day preflight transitions.
  */
-bool runEmailNetworkPreflight(time_t nowEpoch, const char* deliveryContext) {
-  const int dayKey = buildLocalDayKey(nowEpoch);
-  const bool shouldDailyReconnect = (dayKey >= 0) && (dayKey != gLastEmailNetworkPreflightDayKey);
-
+bool runEmailNetworkPreflight(const char* deliveryContext) {
   // Reconnect only when actually needed.
   const bool needReconnect = !isWifiConnected() || !gInternetReachable;
 
@@ -686,11 +683,6 @@ bool runEmailNetworkPreflight(time_t nowEpoch, const char* deliveryContext) {
     gWasWifiConnected = true;
     gShowWifiIp = false;
     gLastWifiIpDisplayMs = millis();
-  }
-
-  // Mark preflight done for this local day even if no reconnect was needed.
-  if (shouldDailyReconnect) {
-    gLastEmailNetworkPreflightDayKey = dayKey;
   }
 
   const unsigned long nowMs = millis();
@@ -782,7 +774,7 @@ bool sendDailyUpdateEmail(time_t nowEpoch, const char* subject, const char* emai
     return false;
   }
 
-  if (!runEmailNetworkPreflight(nowEpoch, deliveryContext)) {
+  if (!runEmailNetworkPreflight(deliveryContext)) {
     return false;
   }
 
@@ -992,16 +984,23 @@ bool sendMinimalTestEmail() {
 }
 
 /**
- * Send low-humidity alert once per dry event.
- * Edge-triggered: fires only on transition from >=30% to <30%.
+ * Send low-humidity alert once per dry phase.
+ * Uses hysteresis to avoid duplicate alerts while humidity oscillates near the threshold.
  */
 void maybeSendLowHumidityAlert() {
-  if (gHumidityPercent >= 30) {
-    gWasBelowLowHumidityThreshold = false;
+  if (gHumidityPercent >= LOW_HUMIDITY_ALERT_RESET_PERCENT) {
+    gLowHumidityAlertActive = false;
+    gLastLowHumidityAlertAttemptMs = 0;
     return;
   }
 
-  if (gWasBelowLowHumidityThreshold) {
+  const bool isDryNow = gHumidityPercent < LOW_HUMIDITY_ALERT_TRIGGER_PERCENT;
+  if (!isDryNow || gLowHumidityAlertActive) {
+    return;
+  }
+
+  const unsigned long nowMs = millis();
+  if (gLastLowHumidityAlertAttemptMs > 0 && nowMs - gLastLowHumidityAlertAttemptMs < EMAIL_RETRY_INTERVAL_MS) {
     return;
   }
 
@@ -1011,22 +1010,23 @@ void maybeSendLowHumidityAlert() {
     return;
   }
 
-  gWasBelowLowHumidityThreshold = true;
-
+  gLastLowHumidityAlertAttemptMs = nowMs;
   const time_t nowEpoch = time(nullptr);
-  sendDailyUpdateEmail(
-    nowEpoch,
-    RESEND_URGENT_SUBJECT,
-    "Allerta umidità bassa",
-    "Invio automatico per soglia sotto 30%");
+  if (sendDailyUpdateEmail(
+        nowEpoch,
+        RESEND_URGENT_SUBJECT,
+        "Allerta umidità bassa",
+        "Invio automatico per soglia sotto 30%")) {
+    gLowHumidityAlertActive = true;
+  }
 }
 
 /**
  * Send daily scheduled email after configured local time.
  * At most one successful scheduled email per local day.
- * Properly tracks retry state without premature timeout resets.
+ * Uses dedicated retry state (independent from low-humidity alerts).
  */
-void maybeSendScheduledEmail() {
+void maybeSendDailySummaryEmail() {
   if (!isWifiConnected()) {
     return;
   }
@@ -1039,7 +1039,7 @@ void maybeSendScheduledEmail() {
   const unsigned long nowMs = millis();
 
   // Check if we need to wait for retry interval before attempting again.
-  if (gLastEmailAttemptMs > 0 && nowMs - gLastEmailAttemptMs < EMAIL_RETRY_INTERVAL_MS) {
+  if (gLastDailySummaryAttemptMs > 0 && nowMs - gLastDailySummaryAttemptMs < EMAIL_RETRY_INTERVAL_MS) {
     return;
   }
 
@@ -1059,16 +1059,14 @@ void maybeSendScheduledEmail() {
 
   const int dayKey = buildLocalDayKey(nowEpoch);
   // One scheduled email per local day (after target time).
-  if (dayKey < 0 || dayKey == gLastDailyEmailDayKey) {
+  if (dayKey < 0 || dayKey == gLastDailySummarySentDayKey) {
     return;
   }
 
-  // Attempt send; only update retry timer after send attempt, not before.
+  // Attempt send with dedicated daily-summary retry state.
+  gLastDailySummaryAttemptMs = nowMs;
   if (sendDailyUpdateEmail(nowEpoch, RESEND_SUBJECT, "Aggiornamento terreno", "Invio automatico giornaliero")) {
-    gLastDailyEmailDayKey = dayKey;
-    gLastEmailAttemptMs = nowMs;
-  } else {
-    gLastEmailAttemptMs = nowMs;
+    gLastDailySummarySentDayKey = dayKey;
   }
 }
 
@@ -1175,14 +1173,19 @@ void setupWebServer() {
     json += "\"status\":\"" + jsonEscape(gEmailStatus) + "\",";
     json += "\"error\":\"" + jsonEscape(gLastEmailErrorDetail) + "\",";
     json += "\"humidity\":" + String(gHumidityPercent) + ",";
-    json += "\"belowThreshold\":" + String(gWasBelowLowHumidityThreshold ? "true" : "false") + ",";
+    json += "\"belowThreshold\":" + String(gHumidityPercent < LOW_HUMIDITY_ALERT_TRIGGER_PERCENT ? "true" : "false") + ",";
+    json += "\"lowHumidityAlertActive\":" + String(gLowHumidityAlertActive ? "true" : "false") + ",";
+    json += "\"lowHumidityTrigger\":" + String(LOW_HUMIDITY_ALERT_TRIGGER_PERCENT) + ",";
+    json += "\"lowHumidityReset\":" + String(LOW_HUMIDITY_ALERT_RESET_PERCENT) + ",";
     json += "\"timeSynced\":" + String(isTimeSynced() ? "true" : "false") + ",";
     json += "\"wifiConnected\":" + String(isWifiConnected() ? "true" : "false") + ",";
     json += "\"internetReachable\":" + String(gInternetReachable ? "true" : "false") + ",";
     json += "\"freeHeap\":" + String(ESP.getFreeHeap()) + ",";
     json += "\"heapFragmentation\":" + String(ESP.getHeapFragmentation()) + ",";
     json += "\"maxFreeBlock\":" + String(ESP.getMaxFreeBlockSize()) + ",";
-    json += "\"lastAttemptMs\":" + String(gLastEmailAttemptMs) + ",";
+    json += "\"lastDailySummaryAttemptMs\":" + String(gLastDailySummaryAttemptMs) + ",";
+    json += "\"lastLowHumidityAlertAttemptMs\":" + String(gLastLowHumidityAlertAttemptMs) + ",";
+    json += "\"lastDailySummarySentDayKey\":" + String(gLastDailySummarySentDayKey) + ",";
     json += "\"nowMs\":" + String(millis());
     json += "}";
     server.send(200, "application/json", json);
@@ -1248,7 +1251,7 @@ void loop() {
 
   maybeStoreHistorySample();
   maybeSendLowHumidityAlert();
-  maybeSendScheduledEmail();
+  maybeSendDailySummaryEmail();
 
   server.handleClient();
   ElegantOTA.loop();

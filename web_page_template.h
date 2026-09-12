@@ -8,6 +8,7 @@
  * Purpose: Web dashboard HTML/CSS/JS template with runtime placeholders.
  *
  * Changelog:
+ * - 2026-09-12: Updated the chart title and date-only labels for the seven-day history window.
  * - 2026-05-07: Updated ambient labels to "Temp. ambiente" and "Umidità ambiente".
  * - 2026-05-04: Added ambient temperature/humidity fields from DHT11 and refreshed UI labels/icons.
  * - 2026-05-03: Reorganized header comments and standardized formatting (form only).
@@ -316,7 +317,7 @@ const char HOMEPAGE_TEMPLATE[] PROGMEM = R"rawliteral(
       </div>
 
       <div class="card card-history">
-        <p class="chart-title">Storico umidità (ultime 24h)</p>
+        <p class="chart-title">Storico umidità (ultimi 7 giorni)</p>
         <svg id="historyChart" viewBox="0 0 320 160" preserveAspectRatio="none" aria-label="Grafico storico umidità"></svg>
       </div>
     </div>
@@ -410,10 +411,9 @@ const char HOMEPAGE_TEMPLATE[] PROGMEM = R"rawliteral(
         const last = points[points.length - 1];
         const firstDate = new Date(Number(first.t) * 1000);
         const lastDate = new Date(Number(last.t) * 1000);
-        const startLabel = firstDate.toLocaleDateString('it-IT', { day: 'numeric', month: 'numeric' }) + ' ' +
-          firstDate.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
-        const endLabel = lastDate.toLocaleDateString('it-IT', { day: 'numeric', month: 'numeric' }) + ' ' +
-          lastDate.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+        const historyLabelOptions = { weekday: 'short', day: '2-digit', month: '2-digit' };
+        const startLabel = firstDate.toLocaleDateString('it-IT', historyLabelOptions);
+        const endLabel = lastDate.toLocaleDateString('it-IT', historyLabelOptions);
 
         svg.innerHTML =
           '<rect x="0" y="0" width="' + width + '" height="' + height + '" fill="transparent"></rect>' +
