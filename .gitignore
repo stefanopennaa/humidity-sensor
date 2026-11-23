@@ -6,3 +6,6 @@ secrets.h
 
 # macOS
 .DS_Store
+
+# Local experiment, not versioned
+temp-logger/
